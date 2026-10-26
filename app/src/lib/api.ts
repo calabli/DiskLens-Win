@@ -144,6 +144,13 @@ export function startScan(path: string, onEvent: (e: ScanEvent) => void) {
 
 export const cancelScan = () => invoke<void>("cancel_scan");
 
+export type RefreshResult =
+  | { kind: "updated"; added: number; removed: number; updated: number; elapsedMs: number }
+  | { kind: "needsFullScan"; reason: string };
+
+/** 按 USN 日志增量刷新当前结果。不能增量刷新时返回原因，由调用方决定是否完整重扫。 */
+export const refreshScan = () => invoke<RefreshResult>("refresh_scan");
+
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
 

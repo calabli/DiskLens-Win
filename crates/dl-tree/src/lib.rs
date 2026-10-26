@@ -6,8 +6,15 @@
 //! 每个节点记两种大小：逻辑大小（文件内容的字节数）和占用空间（按簇分配、
 //! 考虑压缩与稀疏后实际占用的磁盘空间）。
 //!
-//! 约定：父节点必须先于子节点加入（父节点的 id 更小）。[`FileTree::finalize`]
+//! 约定：建树时父节点必须先于子节点加入（父节点的 id 更小）。[`FileTree::finalize`]
 //! 依赖这一点，只需倒序扫一遍就能把大小和文件数汇总到每个目录。
+//!
+//! finalize 之后树仍可修改（[`insert`](FileTree::insert)、[`detach`](FileTree::detach)、
+//! [`move_to`](FileTree::move_to) 等），每次修改都会同步更新所有祖先的汇总，
+//! 用于删除文件和按 USN 日志增量刷新。新节点总是追加在末尾，已有节点的 id 不变。
+//!
+//! 每个节点可以带一个 `u64` 键，表示它在来源中的编号（例如 MFT 记录号），
+//! 增量刷新时用来把变化对应到节点。
 
 mod codec;
 mod layout;
@@ -20,6 +27,8 @@ pub use layout::{Rect, squarify};
 pub type NodeId = u32;
 
 const NONE: NodeId = NodeId::MAX;
+/// 没有键的节点在键列里存这个值。
+const NO_KEY: u64 = u64::MAX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
@@ -42,6 +51,8 @@ pub struct FileTree {
     name_start: Vec<u32>,
     name_len: Vec<u16>,
     names: String,
+    /// 节点在来源中的编号；没有设置过任何键时为空。
+    keys: Vec<u64>,
     finalized: bool,
 }
 
@@ -79,6 +90,7 @@ impl FileTree {
             + cap(&self.files)
             + cap(&self.name_start)
             + cap(&self.name_len)
+            + cap(&self.keys)
             + self.names.capacity()
     }
 
@@ -93,6 +105,7 @@ impl FileTree {
         self.files.shrink_to_fit();
         self.name_start.shrink_to_fit();
         self.name_len.shrink_to_fit();
+        self.keys.shrink_to_fit();
         self.names.shrink_to_fit();
     }
 
@@ -156,7 +169,28 @@ impl FileTree {
         self.files.push(u32::from(kind == NodeKind::File));
         self.name_start.push(start);
         self.name_len.push(len);
+        if !self.keys.is_empty() {
+            self.keys.push(NO_KEY);
+        }
         id
+    }
+
+    /// 设置节点的键。
+    pub fn set_key(&mut self, id: NodeId, key: u64) {
+        if self.keys.is_empty() {
+            self.keys = vec![NO_KEY; self.len()];
+        }
+        self.keys[id as usize] = key;
+    }
+
+    /// 节点的键；没有设置过时为 `None`。
+    pub fn key(&self, id: NodeId) -> Option<u64> {
+        self.keys.get(id as usize).copied().filter(|&k| k != NO_KEY)
+    }
+
+    /// 是否有节点设置过键。
+    pub fn has_keys(&self) -> bool {
+        !self.keys.is_empty()
     }
 
     /// 把大小、占用空间和文件数逐级汇总到目录，并释放多余容量。整棵树建完后调用一次。
@@ -243,17 +277,135 @@ impl FileTree {
         }
 
         let (size, allocated, files) = (self.size(id), self.allocated(id), self.file_count(id));
-        let mut cur = Some(parent);
-        while let Some(n) = cur {
-            let i = n as usize;
-            self.size[i] = self.size[i].saturating_sub(size);
-            self.allocated[i] = self.allocated[i].saturating_sub(allocated);
-            self.files[i] = self.files[i].saturating_sub(files);
-            cur = self.parent(n);
-        }
+        self.add_to_ancestors(
+            parent,
+            -(size as i128),
+            -(allocated as i128),
+            -i64::from(files),
+        );
         self.parent[id as usize] = NONE;
         self.next_sibling[id as usize] = NONE;
         true
+    }
+
+    /// 把 `dir` 及其所有祖先的汇总加上给定的增量（可以为负）。
+    fn add_to_ancestors(&mut self, dir: NodeId, size: i128, allocated: i128, files: i64) {
+        fn apply<T: TryFrom<i128> + Into<i128> + Copy + Default>(v: &mut T, delta: i128) {
+            *v = T::try_from(((*v).into() + delta).max(0)).unwrap_or_default();
+        }
+        let mut cur = Some(dir);
+        while let Some(n) = cur {
+            let i = n as usize;
+            apply(&mut self.size[i], size);
+            apply(&mut self.allocated[i], allocated);
+            apply(&mut self.files[i], i128::from(files));
+            cur = self.parent(n);
+        }
+    }
+
+    /// 在 finalize 之后加入一个节点，并更新祖先的汇总。新节点追加在末尾。
+    ///
+    /// # Panics
+    ///
+    /// `parent` 不是目录时。
+    pub fn insert(
+        &mut self,
+        parent: NodeId,
+        name: &str,
+        kind: NodeKind,
+        size: u64,
+        allocated: u64,
+    ) -> NodeId {
+        assert!(self.finalized, "insert requires a finalized tree");
+        assert!(
+            self.kind.get(parent as usize) == Some(&NodeKind::Dir),
+            "parent {parent} is not a directory"
+        );
+        let (size, allocated) = if kind == NodeKind::Dir {
+            (0, 0)
+        } else {
+            (size, allocated)
+        };
+        let id = self.push(parent, name, kind, size, allocated);
+        self.next_sibling[id as usize] = self.first_child[parent as usize];
+        self.first_child[parent as usize] = id;
+        let files = i64::from(self.files[id as usize]);
+        self.add_to_ancestors(parent, size.into(), allocated.into(), files);
+        id
+    }
+
+    /// 修改文件的大小和占用空间，并更新祖先的汇总。目录不做任何事。
+    pub fn set_file_size(&mut self, id: NodeId, size: u64, allocated: u64) {
+        let i = id as usize;
+        if self.kind[i] != NodeKind::File {
+            return;
+        }
+        let ds = i128::from(size) - i128::from(self.size[i]);
+        let da = i128::from(allocated) - i128::from(self.allocated[i]);
+        self.size[i] = size;
+        self.allocated[i] = allocated;
+        if let Some(p) = self.parent(id) {
+            self.add_to_ancestors(p, ds, da, 0);
+        }
+    }
+
+    /// 改名。旧名称留在名称池里不回收。
+    pub fn rename(&mut self, id: NodeId, name: &str) {
+        if self.name(id) == name {
+            return;
+        }
+        let len = u16::try_from(name.len()).expect("name longer than u16::MAX bytes");
+        let start = u32::try_from(self.names.len()).expect("name pool exceeds 4 GiB");
+        self.names.push_str(name);
+        self.name_start[id as usize] = start;
+        self.name_len[id as usize] = len;
+    }
+
+    /// 把节点（连同子树）移到目录 `new_parent` 下，并更新新旧两边祖先的汇总。
+    /// 节点原本已经摘除（不在任何目录下）时，相当于重新挂回去。
+    /// `new_parent` 是节点自身或其后代时不移动，返回 `false`。
+    ///
+    /// # Panics
+    ///
+    /// `new_parent` 不是目录时。
+    pub fn move_to(&mut self, id: NodeId, new_parent: NodeId) -> bool {
+        assert!(
+            self.kind.get(new_parent as usize) == Some(&NodeKind::Dir),
+            "parent {new_parent} is not a directory"
+        );
+        if id == self.root() || self.is_within(new_parent, id) {
+            return false;
+        }
+        if self.parent(id) == Some(new_parent) {
+            return true;
+        }
+        if self.parent(id).is_some() {
+            self.detach(id);
+        }
+        let i = id as usize;
+        self.parent[i] = new_parent;
+        self.next_sibling[i] = self.first_child[new_parent as usize];
+        self.first_child[new_parent as usize] = id;
+        let (size, allocated, files) = (self.size[i], self.allocated[i], self.files[i]);
+        self.add_to_ancestors(new_parent, size.into(), allocated.into(), files.into());
+        true
+    }
+
+    /// `id` 是否是 `ancestor` 本身或其后代。
+    fn is_within(&self, id: NodeId, ancestor: NodeId) -> bool {
+        let mut cur = Some(id);
+        while let Some(n) = cur {
+            if n == ancestor {
+                return true;
+            }
+            cur = self.parent(n);
+        }
+        false
+    }
+
+    /// 节点是否还挂在树上（沿父节点能走到根）。摘除的节点及其子树返回 `false`。
+    pub fn is_attached(&self, id: NodeId) -> bool {
+        (id as usize) < self.len() && self.is_within(id, self.root())
     }
 
     /// 按名称查找直接子节点。
@@ -383,6 +535,55 @@ mod tests {
         assert!(t.detach(first));
         assert_eq!(t.size(0), before);
         assert!(!t.detach(0), "root cannot be detached");
+    }
+
+    #[test]
+    fn edits_after_finalize_keep_totals() {
+        let mut t = sample();
+        let users = t.child_by_name(0, "Users").unwrap();
+        let docs = t.child_by_name(users, "Docs").unwrap();
+
+        let f = t.insert(docs, "new.log", NodeKind::File, 50, 4_096);
+        assert_eq!(t.size(docs), 1_050);
+        assert_eq!(t.size(0), 8_050);
+        assert_eq!(t.file_count(0), 5);
+
+        t.set_file_size(f, 10, 0);
+        assert_eq!(t.size(users), 5_010 + 1_000);
+        assert_eq!(t.allocated(0), 20_480);
+
+        let d = t.insert(0, "Archive", NodeKind::Dir, 999, 999);
+        assert_eq!(t.size(d), 0, "directories start empty");
+        assert!(t.move_to(docs, d));
+        assert_eq!(t.size(d), 1_010);
+        assert_eq!(t.size(users), 5_000);
+        assert_eq!(t.size(0), 8_010);
+        assert_eq!(t.path(f), r"C:\Archive\Docs\new.log");
+
+        assert!(!t.move_to(d, docs), "cannot move into own subtree");
+        t.rename(d, "旧");
+        assert_eq!(t.path(f), r"C:\旧\Docs\new.log");
+
+        t.detach(d);
+        assert!(!t.is_attached(f));
+        assert!(t.is_attached(users));
+        assert_eq!(t.size(0), 7_000);
+        // 重新挂回去。
+        assert!(t.move_to(d, users));
+        assert_eq!(t.size(0), 8_010);
+        assert!(t.is_attached(f));
+    }
+
+    #[test]
+    fn keys_are_optional() {
+        let mut t = sample();
+        assert!(!t.has_keys());
+        assert_eq!(t.key(1), None);
+        t.set_key(1, 42);
+        assert_eq!(t.key(1), Some(42));
+        assert_eq!(t.key(2), None);
+        let n = t.insert(0, "x", NodeKind::File, 1, 1);
+        assert_eq!(t.key(n), None);
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 use std::time::Instant;
 
 use dl_analyze::ChildBreakdown;
+use dl_ntfs::usn::{JournalPos, NodeIndex};
 use dl_tree::{FileTree, NodeId};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -67,6 +68,10 @@ pub struct Scanned {
     pub summary: ScanSummary,
     /// 每个目录的类型统计，计算一次后缓存；树变化时清空。
     pub breakdowns: Mutex<HashMap<NodeId, Arc<ChildBreakdown>>>,
+    /// 树对应的 USN 日志位置；没有日志（或不是 MFT 扫描）时为 `None`。
+    pub journal: Mutex<Option<JournalPos>>,
+    /// 记录号到节点的索引，第一次增量刷新时建立。同时用作刷新的互斥锁。
+    pub index: Mutex<Option<NodeIndex>>,
 }
 
 impl Scanned {
@@ -82,7 +87,13 @@ impl Scanned {
             tree: RwLock::new(tree),
             summary,
             breakdowns: Mutex::new(HashMap::new()),
+            journal: Mutex::new(None),
+            index: Mutex::new(None),
         }
+    }
+
+    pub fn journal(&self) -> Option<JournalPos> {
+        *self.journal.lock().expect("journal poisoned")
     }
 
     pub fn read(&self) -> RwLockReadGuard<'_, FileTree> {
@@ -201,9 +212,16 @@ fn run_scan(
             mode: ScanMode::Mft,
             fallback_reason: None,
         });
+        // 先记下日志位置再扫描：扫描期间的变化在下次刷新时重放，结果不受影响。
+        let journal = dl_ntfs::open_volume(letter)
+            .ok()
+            .and_then(|v| dl_ntfs::usn::query_journal(&v).ok())
+            .map(|(pos, _)| pos);
         match dl_ntfs::scan_volume(letter, report) {
             Ok(scan) => {
-                return Ok(finish(path, ScanMode::Mft, None, scan.tree, 0, started));
+                let scanned = finish(path, ScanMode::Mft, None, scan.tree, 0, started);
+                *scanned.journal.lock().expect("journal poisoned") = journal;
+                return Ok(scanned);
             }
             Err(dl_ntfs::Error::Cancelled) => return Err("已取消".into()),
             Err(e) => fallback_reason = Some(e.to_string()),

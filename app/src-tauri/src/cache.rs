@@ -29,6 +29,11 @@ pub struct CacheMeta {
     pub scanned_at: u64,
     pub total_size: u64,
     pub file_count: u32,
+    /// 树对应的 USN 日志位置，用于下次启动后增量刷新。
+    #[serde(default)]
+    pub journal_id: Option<u64>,
+    #[serde(default)]
+    pub journal_usn: Option<i64>,
 }
 
 /// 首页列出的一条缓存。
@@ -85,6 +90,8 @@ pub fn save_in_background(scan: Arc<Scanned>) {
 
 fn save(scan: &Scanned) -> Result<(), String> {
     let path = cache_path(&scan.summary.root)?;
+    // 先取日志位置再读树：刷新会先改树再更新位置，这样存下的位置不会比树新。
+    let journal = scan.journal();
     let tree = scan.read();
     let s = &scan.summary;
     let meta = CacheMeta {
@@ -96,6 +103,8 @@ fn save(scan: &Scanned) -> Result<(), String> {
         scanned_at: s.scanned_at,
         total_size: tree.size(tree.root()),
         file_count: tree.file_count(tree.root()),
+        journal_id: journal.map(|j| j.id),
+        journal_usn: journal.map(|j| j.next_usn),
     };
     dl_snapshot::save(&path, &meta, &tree).map_err(|e| e.to_string())
 }
@@ -152,6 +161,10 @@ pub async fn open_cached(root: String, state: State<'_, AppState>) -> Result<Sca
         from_cache: true,
     };
     let scanned = Scanned::new(tree, summary);
+    if let (Some(id), Some(next_usn)) = (meta.journal_id, meta.journal_usn) {
+        *scanned.journal.lock().expect("journal poisoned") =
+            Some(dl_ntfs::usn::JournalPos { id, next_usn });
+    }
     let summary = scanned.summary.clone();
     *state.scan.lock().expect("state poisoned") = Some(Arc::new(scanned));
     Ok(summary)

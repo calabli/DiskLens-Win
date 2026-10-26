@@ -85,7 +85,7 @@ pub struct SearchHit {
 
 /// 节点存在且仍挂在树上（没有被删除摘掉）。
 pub(crate) fn check(tree: &FileTree, id: NodeId) -> Result<(), String> {
-    if (id as usize) < tree.len() && (id == tree.root() || tree.parent(id).is_some()) {
+    if tree.is_attached(id) {
         Ok(())
     } else {
         Err("这个项目已不存在，可能已被删除或扫描结果已更新".into())

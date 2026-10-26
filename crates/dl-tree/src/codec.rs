@@ -2,17 +2,18 @@
 //!
 //! 格式（全部小端）：`DLTR`、版本 u32、节点数 n u32、名称池字节数 u32，
 //! 然后依次是各列：parent、first_child、next_sibling（u32 × n）、kind（u8 × n）、
-//! size、allocated（u64 × n）、files、name_start（u32 × n）、name_len（u16 × n）、名称池。
+//! size、allocated（u64 × n）、files、name_start（u32 × n）、name_len（u16 × n）、名称池，
+//! 版本 2 起最后是键列：有无键 u8，有键时再跟 u64 × n。
 //!
-//! 读取时校验每个索引：父节点 id 小于自身、第一个子节点 id 大于自身、下一个兄弟 id 小于自身
-//! （这是建树和摘除节点都保持的不变量）。这样损坏的数据不会造成越界或死循环。
+//! 读取时检查所有索引都在范围内，并从根出发走一遍：每个子节点的 parent 必须指回所在目录，
+//! 且只能被访问一次。走不到的节点（已摘除的）把链接清空。这样损坏的数据不会造成越界或死循环。
 
 use std::io::{self, Read, Write};
 
 use super::{FileTree, NONE, NodeId, NodeKind};
 
 const MAGIC: &[u8; 4] = b"DLTR";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, format!("文件树数据损坏：{msg}"))
@@ -87,7 +88,9 @@ impl FileTree {
         self.name_len
             .iter()
             .try_for_each(|x| w.write_all(&x.to_le_bytes()))?;
-        w.write_all(self.names.as_bytes())
+        w.write_all(self.names.as_bytes())?;
+        w.write_all(&[u8::from(self.has_keys())])?;
+        write_u64s(w, &self.keys)
     }
 
     /// 从 `r` 读回 [`write_to`](Self::write_to) 写出的树。数据不完整或不一致时返回
@@ -98,7 +101,8 @@ impl FileTree {
         if &magic != MAGIC {
             return Err(invalid("文件头不对"));
         }
-        if read_u32(r)? != VERSION {
+        let version = read_u32(r)?;
+        if !(1..=VERSION).contains(&version) {
             return Err(invalid("版本不支持"));
         }
         let n = read_u32(r)? as usize;
@@ -130,28 +134,17 @@ impl FileTree {
             .collect();
         let names = String::from_utf8(read_bytes(r, names_len)?)
             .map_err(|_| invalid("名称不是有效的 UTF-8"))?;
+        let mut flag = [0u8; 1];
+        let keys = if version >= 2 && {
+            r.read_exact(&mut flag)?;
+            flag[0] == 1
+        } {
+            read_u64s(r, n)?
+        } else {
+            Vec::new()
+        };
 
-        if parent[0] != NONE || kind[0] != NodeKind::Dir {
-            return Err(invalid("根节点不对"));
-        }
-        for i in 0..n {
-            let id = i as NodeId;
-            let ok_parent =
-                parent[i] == NONE || (parent[i] < id && kind[parent[i] as usize] == NodeKind::Dir);
-            let ok_child =
-                first_child[i] == NONE || (first_child[i] > id && (first_child[i] as usize) < n);
-            let ok_next = next_sibling[i] == NONE || next_sibling[i] < id;
-            if !(ok_parent && ok_child && ok_next) {
-                return Err(invalid("节点链接不对"));
-            }
-            let start = name_start[i] as usize;
-            let end = start + name_len[i] as usize;
-            if end > names.len() || !names.is_char_boundary(start) || !names.is_char_boundary(end) {
-                return Err(invalid("名称位置不对"));
-            }
-        }
-
-        Ok(Self {
+        let mut tree = Self {
             parent,
             first_child,
             next_sibling,
@@ -162,8 +155,61 @@ impl FileTree {
             name_start,
             name_len,
             names,
+            keys,
             finalized: true,
-        })
+        };
+        tree.validate()?;
+        Ok(tree)
+    }
+
+    /// 检查读回的数据，见模块说明。
+    fn validate(&mut self) -> io::Result<()> {
+        let n = self.len();
+        let in_range = |v: NodeId| v == NONE || (v as usize) < n;
+        for i in 0..n {
+            if !(in_range(self.parent[i])
+                && in_range(self.first_child[i])
+                && in_range(self.next_sibling[i]))
+            {
+                return Err(invalid("节点编号越界"));
+            }
+            let start = self.name_start[i] as usize;
+            let end = start + self.name_len[i] as usize;
+            if end > self.names.len()
+                || !self.names.is_char_boundary(start)
+                || !self.names.is_char_boundary(end)
+            {
+                return Err(invalid("名称位置不对"));
+            }
+        }
+        if self.parent[0] != NONE || self.kind[0] != NodeKind::Dir {
+            return Err(invalid("根节点不对"));
+        }
+
+        let mut seen = vec![false; n];
+        seen[0] = true;
+        let mut stack = vec![0 as NodeId];
+        while let Some(dir) = stack.pop() {
+            let mut child = self.first_child[dir as usize];
+            if child != NONE && self.kind[dir as usize] != NodeKind::Dir {
+                return Err(invalid("文件下面挂着子节点"));
+            }
+            while child != NONE {
+                let c = child as usize;
+                if seen[c] || self.parent[c] != dir {
+                    return Err(invalid("节点链接不对"));
+                }
+                seen[c] = true;
+                stack.push(child);
+                child = self.next_sibling[c];
+            }
+        }
+        for (i, _) in seen.iter().enumerate().filter(|(_, s)| !**s) {
+            self.parent[i] = NONE;
+            self.first_child[i] = NONE;
+            self.next_sibling[i] = NONE;
+        }
+        Ok(())
     }
 }
 
@@ -190,7 +236,7 @@ mod tests {
 
     fn describe(t: &FileTree) -> Vec<(String, u64, u64, u32)> {
         (0..t.len() as NodeId)
-            .filter(|&i| i == 0 || t.parent(i).is_some())
+            .filter(|&i| t.is_attached(i))
             .map(|i| (t.path(i), t.size(i), t.allocated(i), t.file_count(i)))
             .collect()
     }
@@ -240,5 +286,42 @@ mod tests {
         bad[off..off + 4].copy_from_slice(&3u32.to_le_bytes());
         let err = FileTree::read_from(&mut bad.as_slice()).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+
+        // 让根的第一个子节点的 next_sibling 指向自己，形成环。
+        let mut bad = buf.clone();
+        let first = t.children(0).next().unwrap();
+        let n = t.len();
+        let off = 16 + 8 * n + 4 * first as usize;
+        bad[off..off + 4].copy_from_slice(&first.to_le_bytes());
+        assert!(FileTree::read_from(&mut bad.as_slice()).is_err(), "cycle");
+    }
+
+    #[test]
+    fn roundtrip_keys_and_moves() {
+        let mut t = sample();
+        for i in 0..t.len() as NodeId {
+            t.set_key(i, 100 + u64::from(i));
+        }
+        // 把旧目录移进新建的目录：新的父节点 id 比自己大。
+        let a = t.child_by_name(0, "资料").unwrap();
+        let newer = t.insert(0, "新", NodeKind::Dir, 0, 0);
+        assert!(t.move_to(a, newer));
+        let back = roundtrip(&t);
+        assert_eq!(describe(&back), describe(&t));
+        assert_eq!(back.key(a), Some(100 + u64::from(a)));
+        assert_eq!(back.key(newer), None);
+        assert_eq!(back.path(a), r"D:\新\资料");
+    }
+
+    #[test]
+    fn detached_nodes_are_unlinked_on_load() {
+        let mut t = sample();
+        let a = t.child_by_name(0, "资料").unwrap();
+        let b = t.child_by_name(a, "b").unwrap();
+        t.detach(a);
+        let back = roundtrip(&t);
+        assert!(!back.is_attached(a));
+        assert!(!back.is_attached(b));
+        assert_eq!(back.parent(b), None);
     }
 }

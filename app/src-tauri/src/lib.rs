@@ -1,6 +1,7 @@
 mod cache;
 mod cleanup;
 mod commands;
+mod refresh;
 mod scan;
 mod volumes;
 
@@ -14,6 +15,7 @@ pub fn run() {
             scan::cancel_scan,
             cache::cached_scans,
             cache::open_cached,
+            refresh::refresh_scan,
             commands::node_info,
             commands::list_children,
             commands::treemap,

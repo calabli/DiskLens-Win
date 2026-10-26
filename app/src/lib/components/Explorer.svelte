@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import {
@@ -6,6 +7,7 @@
     listChildren,
     nodeInfo,
     planDelete,
+    refreshScan,
     search,
     typeStats,
     type ChildList,
@@ -74,6 +76,12 @@
   let plan = $state<DeletePlan | null>(null);
   let deleting = $state(false);
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
+  let refreshing = $state(false);
+  /** 最近一次增量刷新的结果，显示在状态栏。 */
+  let refreshNote = $state<string | null>(null);
+  let lastRefresh = 0;
+  /** 窗口重新获得焦点时，距上次刷新至少这么久才再刷新。 */
+  const FOCUS_REFRESH_MS = 5000;
 
   const entries = $derived(new Map(all.entries.map((e) => [e.id, e])));
   const highlight = $derived(filtered ? new Set(filtered.entries.map((e) => e.id)) : null);
@@ -101,7 +109,15 @@
         error = "";
       })
       .catch((e) => {
-        if (mine === loadSeq) error = String(e);
+        if (mine !== loadSeq) return;
+        // 刷新后当前文件夹可能已被删除，回到根目录。
+        if (id !== summary.rootId && String(e).includes("已不存在")) {
+          back = [];
+          forward = [];
+          dirId = summary.rootId;
+        } else {
+          error = String(e);
+        }
       });
   });
 
@@ -268,6 +284,55 @@
     }
   }
 
+  /**
+   * 按 USN 日志增量刷新。`manual` 为 true 时（点按刷新按钮），不能增量刷新就完整重扫；
+   * 自动刷新时只在状态栏说明原因。
+   */
+  async function refresh(manual: boolean) {
+    if (refreshing || plan || deleting) return;
+    if (summary.mode !== "mft") {
+      if (manual) onrescan();
+      return;
+    }
+    refreshing = true;
+    lastRefresh = Date.now();
+    try {
+      const r = await refreshScan();
+      if (r.kind === "needsFullScan") {
+        if (manual) onrescan();
+        else refreshNote = `未能自动刷新：${r.reason}`;
+        return;
+      }
+      const changed = r.added + r.removed + r.updated;
+      refreshNote =
+        changed > 0
+          ? `已刷新，${changed.toLocaleString()} 项有变化（${(r.elapsedMs / 1000).toFixed(1)} 秒）`
+          : "已是最新";
+      if (changed > 0) {
+        selectOnly(null);
+        hoverId = null;
+        hits = null;
+        rootInfo = await nodeInfo(summary.rootId);
+        version++;
+      }
+    } catch (e) {
+      if (manual) toast = { message: String(e), detail: [], tone: "warn" };
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  // 打开上次的结果后立即刷新一次。只在挂载时运行，不跟踪任何状态。
+  $effect(() => {
+    untrack(() => {
+      if (summary.fromCache) refresh(false);
+    });
+  });
+
+  function onfocus() {
+    if (Date.now() - lastRefresh > FOCUS_REFRESH_MS) refresh(false);
+  }
+
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
     if (target.tagName === "INPUT" || plan) return;
@@ -293,7 +358,7 @@
   }
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} {onfocus} />
 
 <div class="explorer">
   <header class="toolbar">
@@ -403,7 +468,13 @@
         ></path></svg
       ></button
     >
-    <button type="button" class="tool" onclick={onrescan} aria-label="重新扫描" title="重新扫描"
+    <button
+      type="button"
+      class="tool"
+      class:spinning={refreshing}
+      onclick={(e) => (e.shiftKey ? onrescan() : refresh(true))}
+      aria-label="刷新"
+      title="刷新：只读取上次扫描之后的变化。按住 Shift 点按则完整重新扫描"
       ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
         ><path
           d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M12 1.5v3h-3"
@@ -559,9 +630,10 @@
         summary.elapsedMs / 1000
       ).toFixed(1)} 秒{summary.skipped > 0
         ? `，${summary.skipped} 个文件夹无权读取`
-        : ""}，{summary.fromCache
-        ? `这是${formatAgo(summary.scannedAt)}的扫描结果`
-        : `扫描于${formatAgo(summary.scannedAt)}`}
+        : ""}，{refreshNote ??
+        (summary.fromCache
+          ? `这是${formatAgo(summary.scannedAt)}的扫描结果`
+          : `扫描于${formatAgo(summary.scannedAt)}`)}
     </div>
   </footer>
 </div>
@@ -629,6 +701,16 @@
   .nav button:disabled,
   .tool:disabled {
     opacity: 0.3;
+  }
+
+  .spinning svg {
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .tool[aria-pressed="true"] {

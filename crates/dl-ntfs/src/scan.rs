@@ -457,6 +457,8 @@ impl Collector {
         let mut sized = vec![false; n];
         let mut queue: VecDeque<(usize, NodeId)> = VecDeque::new();
         placed[ROOT_RECORD] = true;
+        // 每个节点记下它的 MFT 记录号，USN 增量刷新时据此找到节点。
+        tree.set_key(tree.root(), ROOT_RECORD as u64);
         queue.push_back((ROOT_RECORD, tree.root()));
 
         while let Some((dir, node)) = queue.pop_front() {
@@ -474,6 +476,7 @@ impl Collector {
                     }
                     placed[child] = true;
                     let id = tree.add_dir(node, name);
+                    tree.set_key(id, child as u64);
                     queue.push_back((child, id));
                 } else {
                     placed[child] = true;
@@ -483,7 +486,8 @@ impl Collector {
                         sized[child] = true;
                         (self.size[child], self.allocated[child])
                     };
-                    tree.add_file(node, name, size, allocated);
+                    let id = tree.add_file(node, name, size, allocated);
+                    tree.set_key(id, child as u64);
                 }
             }
         }
@@ -715,6 +719,10 @@ mod tests {
         let big = t.child_by_name(root, "big.bin").unwrap();
         let link = t.child_by_name(users, "big-link.bin").unwrap();
         assert_eq!((t.size(big), t.size(link)), (10_000, 0));
+        // 每个节点的键是 MFT 记录号；硬链接的两个名称是同一条记录。
+        assert_eq!(t.key(root), Some(5));
+        assert_eq!(t.key(big), t.key(link));
+        assert!((0..t.len() as u32).all(|i| t.key(i).is_some()));
 
         assert_eq!(t.size(root), 32_768 + 10_000 + 5 + 1_000_000);
         assert_eq!(t.allocated(root), 32_768 + 12_288 + 4_096 + 4_096);
