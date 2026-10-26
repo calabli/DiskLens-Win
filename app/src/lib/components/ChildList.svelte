@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Entry } from "$lib/api";
+  import type { Entry, SelectMode } from "$lib/api";
   import { CATEGORIES } from "$lib/categories";
   import { formatPercent, formatSize } from "$lib/format";
 
@@ -10,13 +10,16 @@
     /** 当前目录的大小，用来算占比。 */
     parentSize: number;
     hoverId: number | null;
-    selectedId: number | null;
+    /** 选中的项目（可多选）。 */
+    selected: Set<number>;
+    /** 最近选中的一项，保持在可见范围内。 */
+    focusId: number | null;
     onhover: (id: number | null) => void;
     onopen: (id: number) => void;
-    onselect: (id: number) => void;
+    onselect: (id: number, mode: SelectMode) => void;
   }
 
-  let { entries, total, parentSize, hoverId, selectedId, onhover, onopen, onselect }: Props =
+  let { entries, total, parentSize, hoverId, selected, focusId, onhover, onopen, onselect }: Props =
     $props();
 
   const ROW = 30;
@@ -35,7 +38,7 @@
 
   // 选中的项滚到可见范围内（例如从树图点选、返回上一级后）。
   $effect(() => {
-    const id = selectedId;
+    const id = focusId;
     const i = entries.findIndex((e) => e.id === id);
     if (i < 0 || !viewport) return;
     const top = i * ROW;
@@ -44,9 +47,12 @@
     }
   });
 
-  function activate(entry: Entry) {
-    if (entry.isDir && entry.hasChildren) onopen(entry.id);
-    else onselect(entry.id);
+  /** 单击打开文件夹；Ctrl 加选或取消，Shift 连续选择（文件夹也只选不打开）。 */
+  function activate(entry: Entry, event: MouseEvent) {
+    if (event.shiftKey) onselect(entry.id, "range");
+    else if (event.ctrlKey || event.metaKey) onselect(entry.id, "toggle");
+    else if (entry.isDir && entry.hasChildren) onopen(entry.id);
+    else onselect(entry.id, "only");
   }
 </script>
 
@@ -73,11 +79,12 @@
           class="row"
           class:odd={index % 2 === 1}
           class:hover={entry.id === hoverId}
-          class:selected={entry.id === selectedId}
+          class:selected={selected.has(entry.id)}
           style:top="{index * ROW}px"
           aria-label="{entry.isDir ? '文件夹' : '文件'} {entry.name}，{formatSize(entry.size)}"
+          aria-pressed={selected.has(entry.id)}
           onmouseenter={() => onhover(entry.id)}
-          onclick={() => activate(entry)}
+          onclick={(event) => activate(entry, event)}
         >
           <span class="icon" aria-hidden="true">
             {#if entry.isDir}

@@ -22,7 +22,9 @@
   const first = $derived(deletable[0] ?? plan.items[0]);
   const title = $derived(
     deletable.length === 0
-      ? `不能删除“${first.name}”`
+      ? plan.items.length === 1
+        ? `不能删除“${first.name}”`
+        : `不能删除这 ${plan.items.length} 项`
       : deletable.length === 1
         ? permanent
           ? `要彻底删除“${first.name}”吗？`
@@ -74,6 +76,14 @@
   <div id="confirm-desc" class="desc">
     {#if deletable.length === 1}
       <p class="path">{first.path}</p>
+    {:else if deletable.length > 1}
+      <ul class="items">
+        {#each deletable as item (item.id)}
+          <li title={item.path}>
+            <span class="name">{item.name}</span><span class="size">{formatSize(item.size)}</span>
+          </li>
+        {/each}
+      </ul>
     {/if}
     {#if deletable.length > 0}
       <p>
@@ -82,9 +92,16 @@
           : ""}。{permanent ? "彻底删除后无法恢复。" : "之后可以在回收站中恢复。"}
       </p>
     {/if}
-    {#each blocked as item (item.id)}
-      <p class="blocked"><strong>{item.name}</strong>：{item.blocked}</p>
-    {/each}
+    {#if blocked.length > 0}
+      <div class="blocked-list">
+        {#if deletable.length > 0}
+          <p>以下 {blocked.length} 项不能删除，会被跳过：</p>
+        {/if}
+        {#each blocked as item (item.id)}
+          <p class="blocked"><strong>{item.name}</strong>：{item.blocked}</p>
+        {/each}
+      </div>
+    {/if}
   </div>
 
   {#if deletable.length > 0}
@@ -190,6 +207,45 @@
     color: var(--ink);
     font-size: 12px;
     word-break: break-all;
+  }
+
+  .items {
+    max-height: 168px;
+    margin: 4px 0;
+    padding: 4px;
+    overflow-y: auto;
+    border-radius: 8px;
+    background: var(--field);
+    list-style: none;
+    text-align: left;
+  }
+
+  .items li {
+    display: flex;
+    gap: 12px;
+    padding: 3px 6px;
+  }
+
+  .items .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .items .size {
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .desc {
+    align-self: stretch;
+  }
+
+  .blocked-list {
+    max-height: 180px;
+    overflow-y: auto;
   }
 
   .desc .blocked {

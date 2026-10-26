@@ -43,7 +43,7 @@
   --cat-media: #bf7af0;
   --cat-package: #ffd426;
   --cat-document: #34c759;
-  --cat-other: #c7c7cc;
+  --cat-other: #5ac8c8;
   --tile-ink: #1d1d1f;
   --tile-gap: var(--panel);
 }
@@ -79,7 +79,7 @@
     --cat-media: #bf5af2;
     --cat-package: #ffd60a;
     --cat-document: #30d158;
-    --cat-other: #aeaeb2;
+    --cat-other: #40c8c0;
     --tile-ink: #1d1d1f;
   }
 }
