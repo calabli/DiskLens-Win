@@ -1,0 +1,12 @@
+[package]
+name = "dl-tree"
+description = "DiskLens 内存文件树：紧凑存储、大小汇总与查询"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

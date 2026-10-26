@@ -1,0 +1,13 @@
+[package]
+name = "dl-walk"
+description = "DiskLens 普通目录遍历：非 NTFS 卷、网络盘和未提权时使用"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dl-tree.workspace = true
+
+[lints]
+workspace = true

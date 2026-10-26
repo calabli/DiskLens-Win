@@ -1,0 +1,18 @@
+# Rust
+/target/
+
+# 前端
+node_modules/
+/app/build/
+/app/.svelte-kit/
+
+# Tauri 生成的权限 schema
+/app/src-tauri/gen/schemas/
+
+# 测试卷（体积大，由脚本生成）
+*.vhdx
+
+.DS_Store
+.env
+.env.*
+!.env.example

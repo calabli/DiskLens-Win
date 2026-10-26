@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口只开放核心能力和 DiskLens 自定义命令，不开放通用的文件系统和 shell 插件",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

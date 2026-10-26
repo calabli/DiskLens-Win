@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 安装前端依赖
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: 前端检查
+        working-directory: app
+        run: |
+          pnpm check
+          pnpm lint
+
+      # tauri::generate_context! 编译时需要 frontendDist 目录已存在
+      - name: 构建前端
+        working-directory: app
+        run: pnpm build
+
+      - name: Rust 格式
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust 测试
+        run: cargo test --workspace
