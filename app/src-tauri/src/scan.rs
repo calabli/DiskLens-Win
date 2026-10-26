@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 use std::time::Instant;
 
 use dl_analyze::ChildBreakdown;
@@ -56,21 +56,27 @@ pub struct ScanSummary {
     pub elapsed_ms: u64,
 }
 
-/// 一次完成的扫描。
+/// 一次完成的扫描。删除文件后树会被修改，所以放在读写锁里。
 pub struct Scanned {
-    pub tree: FileTree,
+    pub tree: RwLock<FileTree>,
+    /// 扫描完成时的汇总；删除之后的最新数字以树为准。
     pub summary: ScanSummary,
-    /// 每个目录的类型统计，计算一次后缓存。
+    /// 每个目录的类型统计，计算一次后缓存；树变化时清空。
     pub breakdowns: Mutex<HashMap<NodeId, Arc<ChildBreakdown>>>,
 }
 
 impl Scanned {
-    pub fn breakdown(&self, id: NodeId) -> Arc<ChildBreakdown> {
+    pub fn read(&self) -> RwLockReadGuard<'_, FileTree> {
+        self.tree.read().expect("tree poisoned")
+    }
+
+    /// `id` 的类型统计。`tree` 是调用方已经持有的读锁，避免重复加锁。
+    pub fn breakdown(&self, tree: &FileTree, id: NodeId) -> Arc<ChildBreakdown> {
         if let Some(b) = self.breakdowns.lock().expect("cache poisoned").get(&id) {
             return Arc::clone(b);
         }
-        // 计算可能较慢，不持锁计算；并发时最多重复算一次。
-        let b = Arc::new(dl_analyze::breakdown(&self.tree, id));
+        // 计算可能较慢，不持缓存锁计算；并发时最多重复算一次。
+        let b = Arc::new(dl_analyze::breakdown(tree, id));
         self.breakdowns
             .lock()
             .expect("cache poisoned")
@@ -226,7 +232,7 @@ fn finish(
         elapsed_ms: started.elapsed().as_millis() as u64,
     };
     Scanned {
-        tree,
+        tree: RwLock::new(tree),
         summary,
         breakdowns: Mutex::new(HashMap::new()),
     }

@@ -2,11 +2,14 @@
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import {
+    deleteItems,
     listChildren,
     nodeInfo,
+    planDelete,
     search,
     typeStats,
     type ChildList,
+    type DeletePlan,
     type NodeInfo,
     type ScanSummary,
     type SearchHit,
@@ -14,7 +17,9 @@
   } from "$lib/api";
   import { formatPercent, formatSize } from "$lib/format";
   import ChildListView from "./ChildList.svelte";
+  import ConfirmDelete from "./ConfirmDelete.svelte";
   import SearchResults from "./SearchResults.svelte";
+  import Toast from "./Toast.svelte";
   import Treemap from "./Treemap.svelte";
   import TypeStats from "./TypeStats.svelte";
 
@@ -46,6 +51,13 @@
   let hits = $state<SearchHit[] | null>(null);
   let searchedFor = $state("");
   let error = $state("");
+  /** 删除后递增，触发列表、树图、统计重新加载。 */
+  let version = $state(0);
+  /** 删除之后扫描范围的最新汇总（状态栏用）。 */
+  let rootInfo = $state<NodeInfo | null>(null);
+  let plan = $state<DeletePlan | null>(null);
+  let deleting = $state(false);
+  let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
 
   const entries = $derived(new Map(all.entries.map((e) => [e.id, e])));
   const highlight = $derived(filtered ? new Set(filtered.entries.map((e) => e.id)) : null);
@@ -56,6 +68,7 @@
   let loadSeq = 0;
   $effect(() => {
     const id = dirId;
+    void version;
     const mine = ++loadSeq;
     Promise.all([nodeInfo(id), listChildren(id, null), typeStats(id)])
       .then(([i, l, s]) => {
@@ -75,6 +88,7 @@
   $effect(() => {
     const id = dirId;
     const text = filter.trim();
+    void version;
     const mine = ++filterSeq;
     if (!text) {
       filtered = null;
@@ -158,10 +172,55 @@
     filter = "";
   }
 
+  /** 选中项先给出删除汇总，确认后再删。 */
+  async function askDelete() {
+    if (selectedId == null || plan) return;
+    try {
+      plan = await planDelete([selectedId]);
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
+  async function confirmDelete(permanent: boolean) {
+    if (!plan) return;
+    const ids = plan.items.filter((i) => !i.blocked).map((i) => i.id);
+    deleting = true;
+    try {
+      const result = await deleteItems(ids, permanent);
+      const done = result.deleted.length;
+      const verb = permanent ? "已彻底删除" : "已移到回收站";
+      toast = {
+        message: done > 0 ? `${verb}，释放 ${formatSize(result.freed)}` : "没有删除任何项目",
+        detail: [
+          ...result.failed.map((f) => `${f.path}：${f.reason}`),
+          ...(result.logError ? [result.logError] : []),
+        ],
+        tone: result.failed.length > 0 || result.logError ? "warn" : "info",
+      };
+      if (done > 0) {
+        const gone = new Set(result.deleted);
+        if (selectedId != null && gone.has(selectedId)) selectedId = null;
+        hoverId = null;
+        if (hits) hits = hits.filter((h) => !gone.has(h.id));
+        rootInfo = await nodeInfo(summary.rootId);
+        version++;
+      }
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    } finally {
+      deleting = false;
+      plan = null;
+    }
+  }
+
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
-    if (target.tagName === "INPUT") return;
-    if (event.key === "Backspace" || (event.altKey && event.key === "ArrowUp")) {
+    if (target.tagName === "INPUT" || plan) return;
+    if (event.key === "Delete") {
+      event.preventDefault();
+      askDelete();
+    } else if (event.key === "Backspace" || (event.altKey && event.key === "ArrowUp")) {
       event.preventDefault();
       up();
     } else if (event.altKey && event.key === "ArrowLeft") {
@@ -233,6 +292,24 @@
     <span class="mode" class:good={summary.mode === "mft"}>
       {summary.mode === "mft" ? "MFT 直读" : "普通遍历"}
     </span>
+    <button
+      type="button"
+      class="tool"
+      onclick={askDelete}
+      disabled={selectedId == null}
+      aria-label="删除选中的项目（Delete）"
+      title="删除选中的项目（Delete）"
+      ><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+        ><path
+          d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-12"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ></path></svg
+      ></button
+    >
     <button type="button" class="tool" onclick={onrescan} aria-label="重新扫描" title="重新扫描"
       ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
         ><path
@@ -309,6 +386,7 @@
       </div>
       <Treemap
         {dirId}
+        {version}
         {entries}
         {hoverId}
         {selectedId}
@@ -340,14 +418,32 @@
       {/each}
     </nav>
     <div class="status">
-      {summary.fileCount.toLocaleString()} 个文件，逻辑大小 {formatSize(summary.totalSize)}，占用 {formatSize(
-        summary.totalAllocated,
-      )}，扫描用时 {(summary.elapsedMs / 1000).toFixed(1)} 秒{summary.skipped > 0
-        ? `，${summary.skipped} 个文件夹无权读取`
-        : ""}
+      {(rootInfo?.files ?? summary.fileCount).toLocaleString()} 个文件，逻辑大小 {formatSize(
+        rootInfo?.size ?? summary.totalSize,
+      )}，占用 {formatSize(rootInfo?.allocated ?? summary.totalAllocated)}，扫描用时 {(
+        summary.elapsedMs / 1000
+      ).toFixed(1)} 秒{summary.skipped > 0 ? `，${summary.skipped} 个文件夹无权读取` : ""}
     </div>
   </footer>
 </div>
+
+{#if plan}
+  <ConfirmDelete
+    {plan}
+    busy={deleting}
+    onconfirm={confirmDelete}
+    oncancel={() => !deleting && (plan = null)}
+  />
+{/if}
+
+{#if toast}
+  <Toast
+    message={toast.message}
+    detail={toast.detail}
+    tone={toast.tone}
+    onclose={() => (toast = null)}
+  />
+{/if}
 
 <style>
   .explorer {
@@ -385,12 +481,13 @@
   }
 
   .nav button:hover:not(:disabled),
-  .tool:hover {
+  .tool:hover:not(:disabled) {
     background: var(--hover);
     color: var(--ink);
   }
 
-  .nav button:disabled {
+  .nav button:disabled,
+  .tool:disabled {
     opacity: 0.3;
   }
 

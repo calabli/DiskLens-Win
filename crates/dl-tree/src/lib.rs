@@ -215,6 +215,46 @@ impl FileTree {
         kids
     }
 
+    /// 把节点从树中摘除（例如文件已被删除），并从所有祖先的汇总中扣除它的大小和文件数。
+    /// 节点本身的数据保留，只是不再挂在树上。根节点或已摘除的节点返回 `false`。
+    ///
+    /// 硬链接的大小只记在其中一个名称上；摘除那个名称后，另一个名称仍显示为 0。
+    ///
+    /// # Panics
+    ///
+    /// 在 [`finalize`](Self::finalize) 之前调用时。
+    pub fn detach(&mut self, id: NodeId) -> bool {
+        assert!(self.finalized, "detach requires a finalized tree");
+        let Some(parent) = self.parent(id) else {
+            return false;
+        };
+        let next = self.next_sibling[id as usize];
+        if self.first_child[parent as usize] == id {
+            self.first_child[parent as usize] = next;
+        } else {
+            let Some(prev) = self
+                .children(parent)
+                .find(|&c| self.next_sibling[c as usize] == id)
+            else {
+                return false;
+            };
+            self.next_sibling[prev as usize] = next;
+        }
+
+        let (size, allocated, files) = (self.size(id), self.allocated(id), self.file_count(id));
+        let mut cur = Some(parent);
+        while let Some(n) = cur {
+            let i = n as usize;
+            self.size[i] = self.size[i].saturating_sub(size);
+            self.allocated[i] = self.allocated[i].saturating_sub(allocated);
+            self.files[i] = self.files[i].saturating_sub(files);
+            cur = self.parent(n);
+        }
+        self.parent[id as usize] = NONE;
+        self.next_sibling[id as usize] = NONE;
+        true
+    }
+
     /// 按名称查找直接子节点。
     pub fn child_by_name(&self, id: NodeId, name: &str) -> Option<NodeId> {
         self.children(id).find(|&c| self.name(c) == name)
@@ -318,6 +358,30 @@ mod tests {
         assert!(t.heap_bytes() <= before);
         // 每个节点的列加起来约 37 字节，再加上名称。
         assert!(t.heap_bytes() < 1_001 * 48, "{}", t.heap_bytes());
+    }
+
+    #[test]
+    fn detach_updates_ancestors_and_unlinks() {
+        let mut t = sample();
+        let users = t.child_by_name(0, "Users").unwrap();
+        let docs = t.child_by_name(users, "Docs").unwrap();
+        let b = t.child_by_name(docs, "b.bin").unwrap();
+
+        assert!(t.detach(b));
+        assert_eq!(t.size(docs), 100);
+        assert_eq!(t.size(users), 5_100);
+        assert_eq!(t.size(0), 7_100);
+        assert_eq!(t.allocated(0), 16_384);
+        assert_eq!(t.file_count(0), 3);
+        assert_eq!(t.child_by_name(docs, "b.bin"), None);
+        assert!(!t.detach(b), "already detached");
+
+        // 摘除整个目录，并且是父目录的第一个子节点。
+        let first = t.children(0).next().unwrap();
+        let before = t.size(0) - t.size(first);
+        assert!(t.detach(first));
+        assert_eq!(t.size(0), before);
+        assert!(!t.detach(0), "root cannot be detached");
     }
 
     #[test]

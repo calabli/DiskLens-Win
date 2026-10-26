@@ -88,7 +88,37 @@ export interface TreemapRect {
   h: number;
 }
 
+export interface PlanItem {
+  id: number;
+  name: string;
+  path: string;
+  size: number;
+  files: number;
+  isDir: boolean;
+  /** 不能删除时的原因。 */
+  blocked: string | null;
+}
+
+export interface DeletePlan {
+  items: PlanItem[];
+  totalSize: number;
+  totalFiles: number;
+  logDir: string;
+}
+
+export interface DeleteResult {
+  deleted: number[];
+  failed: { path: string; reason: string }[];
+  freed: number;
+  logError: string | null;
+}
+
 export const listVolumes = () => invoke<Volume[]>("list_volumes");
+
+export const planDelete = (ids: number[]) => invoke<DeletePlan>("plan_delete", { ids });
+
+export const deleteItems = (ids: number[], permanent: boolean) =>
+  invoke<DeleteResult>("delete_items", { ids, permanent });
 
 /** 开始扫描。扫描被取消时 Promise 以“已取消”拒绝。 */
 export function startScan(path: string, onEvent: (e: ScanEvent) => void) {

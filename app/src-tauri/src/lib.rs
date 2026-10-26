@@ -1,3 +1,4 @@
+mod cleanup;
 mod commands;
 mod scan;
 mod volumes;
@@ -15,6 +16,8 @@ pub fn run() {
             commands::treemap,
             commands::type_stats,
             commands::search,
+            cleanup::plan_delete,
+            cleanup::delete_items,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
