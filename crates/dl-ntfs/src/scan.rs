@@ -95,9 +95,10 @@ pub fn open_volume(letter: char) -> Result<std::fs::File> {
         .open(path)?)
 }
 
-/// 直读整个卷的 MFT，`progress` 以已处理的记录数被定期调用。
+/// 直读整个卷的 MFT，`progress` 以已处理的记录数被定期调用，返回 `false` 即取消扫描
+/// （返回 [`Error::Cancelled`]）。
 #[cfg(windows)]
-pub fn scan_volume(letter: char, progress: impl FnMut(u64)) -> Result<MftScan> {
+pub fn scan_volume(letter: char, progress: impl FnMut(u64) -> bool) -> Result<MftScan> {
     scan_volume_with_threads(letter, default_threads(), progress)
 }
 
@@ -106,7 +107,7 @@ pub fn scan_volume(letter: char, progress: impl FnMut(u64)) -> Result<MftScan> {
 pub fn scan_volume_with_threads(
     letter: char,
     threads: usize,
-    progress: impl FnMut(u64),
+    progress: impl FnMut(u64) -> bool,
 ) -> Result<MftScan> {
     let volume = open_volume(letter)?;
     let root = format!(r"{}:\", letter.to_ascii_uppercase());
@@ -123,7 +124,7 @@ pub fn default_threads() -> usize {
 pub fn scan_reader<R: ReadAt + Sync + ?Sized>(
     dev: &R,
     root_name: &str,
-    progress: impl FnMut(u64),
+    progress: impl FnMut(u64) -> bool,
 ) -> Result<MftScan> {
     scan_reader_with_threads(dev, root_name, default_threads(), progress)
 }
@@ -132,7 +133,7 @@ pub fn scan_reader_with_threads<R: ReadAt + Sync + ?Sized>(
     dev: &R,
     root_name: &str,
     threads: usize,
-    mut progress: impl FnMut(u64),
+    mut progress: impl FnMut(u64) -> bool,
 ) -> Result<MftScan> {
     let mut head = vec![0u8; 4096];
     dev.read_exact_at(&mut head, 0)?;
@@ -232,7 +233,7 @@ fn read_parallel<R: ReadAt + Sync + ?Sized>(
     rs: usize,
     threads: usize,
     col: &mut Collector,
-    progress: &mut impl FnMut(u64),
+    progress: &mut impl FnMut(u64) -> bool,
 ) -> Result<()> {
     let next = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
@@ -284,14 +285,20 @@ fn read_parallel<R: ReadAt + Sync + ?Sized>(
                 }
                 Ok(_) => continue,
             }
-            while let Some(parsed) = held.remove(&want) {
+            while first_err.is_none() {
+                let Some(parsed) = held.remove(&want) else {
+                    break;
+                };
                 let start = jobs[want].start as usize;
                 for (k, rec) in parsed.into_iter().enumerate() {
                     col.ingest(start + k, rec);
                 }
                 done += jobs[want].records as u64;
                 want += 1;
-                progress(done);
+                if !progress(done) {
+                    first_err = Some(Error::Cancelled);
+                    stop.store(true, Ordering::Relaxed);
+                }
             }
         }
         first_err.map_or(Ok(()), Err)
@@ -306,7 +313,7 @@ fn read_sequential<R: ReadAt + ?Sized>(
     rs: usize,
     total: u64,
     col: &mut Collector,
-    progress: &mut impl FnMut(u64),
+    progress: &mut impl FnMut(u64) -> bool,
 ) -> Result<()> {
     let mut chunk = vec![0u8; CHUNK];
     let mut pending: Vec<u8> = Vec::with_capacity(CHUNK + rs);
@@ -333,8 +340,8 @@ fn read_sequential<R: ReadAt + ?Sized>(
                 );
                 next += 1;
                 pos += rs;
-                if next.is_multiple_of(PROGRESS_EVERY) {
-                    progress(next);
+                if next.is_multiple_of(PROGRESS_EVERY) && !progress(next) {
+                    return Err(Error::Cancelled);
                 }
             }
             pending.drain(..pos);
@@ -678,7 +685,11 @@ mod tests {
     fn builds_tree_from_synthetic_volume() {
         let img = image();
         let mut calls = 0;
-        let scan = scan_reader(img.as_slice(), r"T:\", |_| calls += 1).unwrap();
+        let scan = scan_reader(img.as_slice(), r"T:\", |_| {
+            calls += 1;
+            true
+        })
+        .unwrap();
         let t = &scan.tree;
         let root = t.root();
 
@@ -721,7 +732,7 @@ mod tests {
         let mut img = image();
         img[3..11].copy_from_slice(b"FAT32   ");
         assert!(matches!(
-            scan_reader(img.as_slice(), "X", |_| {}),
+            scan_reader(img.as_slice(), "X", |_| true),
             Err(Error::NotNtfs)
         ));
     }
@@ -730,7 +741,7 @@ mod tests {
     fn survives_truncated_volume() {
         let img = image();
         let cut = &img[..RUN2_LCN * CLUSTER];
-        assert!(matches!(scan_reader(cut, "X", |_| {}), Err(Error::Io(_))));
+        assert!(matches!(scan_reader(cut, "X", |_| true), Err(Error::Io(_))));
     }
 
     /// 生成有 `files` 个文件的合成卷：每 100 个文件一个目录，MFT 是一个连续 run。
@@ -816,9 +827,9 @@ mod tests {
     #[test]
     fn parallel_matches_sequential() {
         for img in [image(), large_image(3_000)] {
-            let seq = scan_reader_with_threads(img.as_slice(), "X", 1, |_| {}).unwrap();
+            let seq = scan_reader_with_threads(img.as_slice(), "X", 1, |_| true).unwrap();
             for threads in [2, 4, 8] {
-                let par = scan_reader_with_threads(img.as_slice(), "X", threads, |_| {}).unwrap();
+                let par = scan_reader_with_threads(img.as_slice(), "X", threads, |_| true).unwrap();
                 assert_eq!(flatten(&par.tree), flatten(&seq.tree), "{threads} threads");
                 assert_eq!(par.corrupt_records, seq.corrupt_records);
                 assert_eq!(par.orphans, seq.orphans);
@@ -827,17 +838,24 @@ mod tests {
     }
 
     #[test]
+    fn progress_can_cancel() {
+        let img = large_image(20_000);
+        let r = scan_reader_with_threads(img.as_slice(), "X", 4, |_| false);
+        assert!(matches!(r, Err(Error::Cancelled)));
+    }
+
+    #[test]
     fn parallel_reports_read_errors() {
         let img = image();
         let cut = &img[..RUN2_LCN * CLUSTER];
-        let r = scan_reader_with_threads(cut, "X", 4, |_| {});
+        let r = scan_reader_with_threads(cut, "X", 4, |_| true);
         assert!(matches!(r, Err(Error::Io(_))));
     }
 
     #[test]
     fn large_volume_counts_every_file() {
         let img = large_image(5_000);
-        let scan = scan_reader(img.as_slice(), "X", |_| {}).unwrap();
+        let scan = scan_reader(img.as_slice(), "X", |_| true).unwrap();
         assert_eq!(scan.tree.file_count(0), 5_001); // 加上 $MFT
         assert_eq!(scan.tree.children(0).count(), 51);
         assert_eq!(scan.corrupt_records, 0);
@@ -851,7 +869,7 @@ mod tests {
         let img = large_image(files);
         for threads in [1, default_threads()] {
             let started = std::time::Instant::now();
-            let scan = scan_reader_with_threads(img.as_slice(), "X", threads, |_| {}).unwrap();
+            let scan = scan_reader_with_threads(img.as_slice(), "X", threads, |_| true).unwrap();
             let secs = started.elapsed().as_secs_f64();
             println!(
                 "{threads} 线程，{files} 个文件：{secs:.3} 秒，折合每百万条记录 {:.2} 秒",

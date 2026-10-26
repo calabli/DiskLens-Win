@@ -595,6 +595,7 @@ dependencies = [
 name = "disklens"
 version = "0.1.0"
 dependencies = [
+ "dl-analyze",
  "dl-ntfs",
  "dl-tree",
  "dl-walk",
@@ -602,6 +603,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -625,6 +627,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "dl-analyze"
+version = "0.1.0"
+dependencies = [
+ "dl-tree",
+ "dl-walk",
 ]
 
 [[package]]

@@ -24,7 +24,7 @@ fn main() {
         .unwrap_or_else(dl_ntfs::default_threads);
 
     let started = Instant::now();
-    let scan = match dl_ntfs::scan_volume_with_threads(letter, threads, |_| {}) {
+    let scan = match dl_ntfs::scan_volume_with_threads(letter, threads, |_| true) {
         Ok(scan) => scan,
         Err(e) => {
             eprintln!("MFT 扫描失败：{e}");

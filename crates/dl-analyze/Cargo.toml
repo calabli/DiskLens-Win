@@ -1,0 +1,16 @@
+[package]
+name = "dl-analyze"
+description = "DiskLens 分析：文件分类、搜索语法、类型统计"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dl-tree.workspace = true
+
+[dev-dependencies]
+dl-walk.workspace = true
+
+[lints]
+workspace = true
