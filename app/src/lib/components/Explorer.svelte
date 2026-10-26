@@ -22,6 +22,7 @@
   import ChildListView from "./ChildList.svelte";
   import ConfirmDelete from "./ConfirmDelete.svelte";
   import SearchResults from "./SearchResults.svelte";
+  import Sunburst from "./Sunburst.svelte";
   import Toast from "./Toast.svelte";
   import Treemap from "./Treemap.svelte";
   import TypeStats from "./TypeStats.svelte";
@@ -37,13 +38,19 @@
   const SEARCH_LIMIT = 500;
   const LAYOUT_KEY = "disklens.panels";
 
-  /** 读取上次的侧栏展开状态；存储不可用时用默认值。 */
-  function loadPanels(): { list: boolean; side: boolean } {
+  type ChartKind = "treemap" | "sunburst";
+
+  /** 读取上次的侧栏展开状态和图表类型；存储不可用时用默认值。 */
+  function loadPanels(): { list: boolean; side: boolean; chart: ChartKind } {
     try {
       const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}");
-      return { list: saved.list !== false, side: saved.side !== false };
+      return {
+        list: saved.list !== false,
+        side: saved.side !== false,
+        chart: saved.chart === "sunburst" ? "sunburst" : "treemap",
+      };
     } catch {
-      return { list: true, side: true };
+      return { list: true, side: true, chart: "treemap" };
     }
   }
 
@@ -91,7 +98,24 @@
   const selectedSize = $derived(
     selection.reduce((sum, id) => sum + (entries.get(id)?.size ?? 0), 0),
   );
-  const focus = $derived(entries.get(hoverId ?? (selection.length === 1 ? selection[0] : -1)));
+  /** 悬停在旭日图外圈（不是当前目录的直接子项）时，现查这一项的信息。 */
+  let hoverDetail = $state<NodeInfo | null>(null);
+  const focus = $derived.by(() => {
+    const id = hoverId ?? (selection.length === 1 ? selection[0] : -1);
+    return entries.get(id) ?? (hoverDetail?.id === id ? hoverDetail : undefined);
+  });
+
+  let detailSeq = 0;
+  $effect(() => {
+    const id = hoverId;
+    const mine = ++detailSeq;
+    if (id == null || untrack(() => entries.has(id))) return;
+    nodeInfo(id)
+      .then((n) => {
+        if (mine === detailSeq) hoverDetail = n;
+      })
+      .catch(() => {});
+  });
   const title = $derived(info ? (info.parent == null ? summary.root : info.name) : "");
 
   // 进入目录：取节点信息、子项和类型分布。只保留最后一次请求的结果。
@@ -299,8 +323,8 @@
     try {
       const r = await refreshScan();
       if (r.kind === "needsFullScan") {
+        // 自动刷新做不到时不打扰，状态栏照常显示扫描时间。
         if (manual) onrescan();
-        else refreshNote = `未能自动刷新：${r.reason}`;
         return;
       }
       const changed = r.added + r.removed + r.updated;
@@ -572,7 +596,7 @@
       </section>
     </div>
 
-    <section class="panel map" aria-label="矩形树图">
+    <section class="panel map" aria-label={panels.chart === "sunburst" ? "旭日图" : "矩形树图"}>
       <div class="map-head">
         {#if focus}
           <strong>{focus.name}</strong>
@@ -585,20 +609,79 @@
           <strong>已选 {selection.length} 项</strong>
           <span>{formatSize(selectedSize)} · {formatPercent(selectedSize, info?.size ?? 0)}</span>
         {:else}
-          <span>点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选</span>
+          <span
+            >{panels.chart === "sunburst"
+              ? "点按一圈放大查看，点按圆心返回上一级；Ctrl 点按可多选"
+              : "点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选"}</span
+          >
         {/if}
+        <div class="chart-switch" role="radiogroup" aria-label="图表类型">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={panels.chart === "treemap"}
+            title="矩形树图"
+            onclick={() => (panels.chart = "treemap")}
+            ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+              ><rect
+                x="1.5"
+                y="1.5"
+                width="13"
+                height="13"
+                rx="2.5"
+                fill="none"
+                stroke="currentColor"
+              ></rect><path d="M8 1.5v13M8 8.5h6.5M11 8.5v6" stroke="currentColor"></path></svg
+            ></button
+          >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={panels.chart === "sunburst"}
+            title="旭日图"
+            onclick={() => (panels.chart = "sunburst")}
+            ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+              ><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor"></circle><circle
+                cx="8"
+                cy="8"
+                r="2.6"
+                fill="none"
+                stroke="currentColor"
+              ></circle><path
+                d="M8 1.5v3.9M13.6 11.2 10.2 9.3M2.4 11.2l3.4-1.9"
+                stroke="currentColor"
+              ></path></svg
+            ></button
+          >
+        </div>
       </div>
-      <Treemap
-        {dirId}
-        {version}
-        {entries}
-        {hoverId}
-        {selected}
-        {highlight}
-        onhover={(id) => (hoverId = id)}
-        onopen={open}
-        onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
-      />
+      {#if panels.chart === "sunburst"}
+        <Sunburst
+          {dirId}
+          {version}
+          {title}
+          size={info?.size ?? 0}
+          {hoverId}
+          {selected}
+          {highlight}
+          onhover={(id) => (hoverId = id)}
+          onopen={open}
+          onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+          onup={up}
+        />
+      {:else}
+        <Treemap
+          {dirId}
+          {version}
+          {entries}
+          {hoverId}
+          {selected}
+          {highlight}
+          onhover={(id) => (hoverId = id)}
+          onopen={open}
+          onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+        />
+      {/if}
     </section>
 
     <div class="fold side-fold" class:collapsed={!panels.side} inert={!panels.side}>
@@ -893,13 +976,41 @@
     overflow: hidden;
   }
 
+  .chart-switch {
+    display: flex;
+    flex: none;
+    gap: 2px;
+    margin-left: auto;
+    padding: 2px;
+    border-radius: 7px;
+    background: var(--field);
+  }
+
+  .chart-switch button {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 20px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-2);
+  }
+
+  .chart-switch button[aria-checked="true"] {
+    background: var(--panel);
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+  }
+
   .map-head strong {
     color: var(--ink);
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .map :global(.treemap) {
+  .map :global(.treemap),
+  .map :global(.sunburst) {
     margin: 0 10px 10px;
   }
 

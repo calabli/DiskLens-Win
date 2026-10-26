@@ -167,6 +167,41 @@ export const typeStats = (id: number) => invoke<TypeStat[]>("type_stats", { id }
 export const search = (id: number, query: string, limit: number) =>
   invoke<SearchHit[]>("search", { id, query, limit });
 
+export interface SunburstSegment {
+  id: number;
+  category: CategoryKey;
+  isDir: boolean;
+  /** 第几圈，从 1 开始。 */
+  depth: number;
+  /** 起止角度，圆周的比例（0..1，从 12 点方向顺时针）。 */
+  start: number;
+  end: number;
+}
+
+/**
+ * 每段 20 字节：id u32、标志 u32（低 8 位类型下标，第 8 位表示目录）、圈 u32、起止角度 f32，小端。
+ * 见 Rust 侧 `commands::sunburst`。
+ */
+const SEGMENT_BYTES = 20;
+
+export async function sunburst(id: number): Promise<SunburstSegment[]> {
+  const buf = await invoke<ArrayBuffer>("sunburst", { id });
+  const view = new DataView(buf);
+  const segments: SunburstSegment[] = [];
+  for (let off = 0; off + SEGMENT_BYTES <= buf.byteLength; off += SEGMENT_BYTES) {
+    const flags = view.getUint32(off + 4, true);
+    segments.push({
+      id: view.getUint32(off, true),
+      category: CATEGORY_KEYS[flags & 0xff] ?? "other",
+      isDir: (flags & 0x100) !== 0,
+      depth: view.getUint32(off + 8, true),
+      start: view.getFloat32(off + 12, true),
+      end: view.getFloat32(off + 16, true),
+    });
+  }
+  return segments;
+}
+
 /** 每块 24 字节：id u32、类型下标 u32、x/y/w/h f32，小端。见 Rust 侧 `commands::treemap`。 */
 const RECT_BYTES = 24;
 

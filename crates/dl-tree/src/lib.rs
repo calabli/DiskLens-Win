@@ -18,10 +18,12 @@
 
 mod codec;
 mod layout;
+mod sunburst;
 
 use std::cmp::Reverse;
 
 pub use layout::{Rect, squarify};
+pub use sunburst::Segment;
 
 /// 节点在树中的索引。根节点固定为 0。
 pub type NodeId = u32;

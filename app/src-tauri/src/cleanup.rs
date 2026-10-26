@@ -149,7 +149,7 @@ pub async fn delete_items(
         }
     }
     if !result.deleted.is_empty() {
-        scan.breakdowns.lock().expect("cache poisoned").clear();
+        scan.invalidate();
         crate::cache::save_in_background(scan);
     }
     Ok(result)

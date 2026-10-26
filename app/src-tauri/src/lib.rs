@@ -19,6 +19,7 @@ pub fn run() {
             commands::node_info,
             commands::list_children,
             commands::treemap,
+            commands::sunburst,
             commands::type_stats,
             commands::search,
             cleanup::plan_delete,

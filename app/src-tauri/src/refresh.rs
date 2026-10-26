@@ -101,7 +101,7 @@ fn run(scan: Arc<Scanned>, letter: char) -> Refresh {
 
     let changed = stats.added + stats.removed + stats.updated > 0;
     if changed {
-        scan.breakdowns.lock().expect("cache poisoned").clear();
+        scan.invalidate();
     }
     drop(index);
     if changed || next != pos {

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 use std::time::Instant;
 
-use dl_analyze::ChildBreakdown;
+use dl_analyze::{Category, ChildBreakdown};
 use dl_ntfs::usn::{JournalPos, NodeIndex};
 use dl_tree::{FileTree, NodeId};
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,8 @@ pub struct Scanned {
     pub summary: ScanSummary,
     /// 每个目录的类型统计，计算一次后缓存；树变化时清空。
     pub breakdowns: Mutex<HashMap<NodeId, Arc<ChildBreakdown>>>,
+    /// 旭日图里各目录的主要类型，按旭日图的中心目录缓存；树变化时清空。
+    pub dominants: Mutex<HashMap<NodeId, Arc<HashMap<NodeId, Category>>>>,
     /// 树对应的 USN 日志位置；没有日志（或不是 MFT 扫描）时为 `None`。
     pub journal: Mutex<Option<JournalPos>>,
     /// 记录号到节点的索引，第一次增量刷新时建立。同时用作刷新的互斥锁。
@@ -87,6 +89,7 @@ impl Scanned {
             tree: RwLock::new(tree),
             summary,
             breakdowns: Mutex::new(HashMap::new()),
+            dominants: Mutex::new(HashMap::new()),
             journal: Mutex::new(None),
             index: Mutex::new(None),
         }
@@ -112,6 +115,30 @@ impl Scanned {
             .expect("cache poisoned")
             .insert(id, Arc::clone(&b));
         b
+    }
+
+    /// 以 `id` 为中心、`depth` 圈旭日图里各目录的主要类型。缓存方式同 [`breakdown`](Self::breakdown)。
+    pub fn dominants(
+        &self,
+        tree: &FileTree,
+        id: NodeId,
+        depth: u32,
+    ) -> Arc<HashMap<NodeId, Category>> {
+        if let Some(d) = self.dominants.lock().expect("cache poisoned").get(&id) {
+            return Arc::clone(d);
+        }
+        let d = Arc::new(dl_analyze::dominant_dirs(tree, id, depth));
+        self.dominants
+            .lock()
+            .expect("cache poisoned")
+            .insert(id, Arc::clone(&d));
+        d
+    }
+
+    /// 树被修改后清空按树计算的缓存。
+    pub fn invalidate(&self) {
+        self.breakdowns.lock().expect("cache poisoned").clear();
+        self.dominants.lock().expect("cache poisoned").clear();
     }
 }
 

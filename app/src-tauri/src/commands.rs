@@ -17,6 +17,14 @@ const MAX_RECTS: usize = 3_000;
 const MIN_RECT_AREA: f32 = 6.0;
 /// 树图二进制格式中每个矩形的字节数：id u32、类型 u32、x/y/w/h 各 f32。
 const RECT_BYTES: usize = 24;
+/// 旭日图画几圈。
+const SUNBURST_DEPTH: u32 = 5;
+/// 旭日图最多画多少段弧。
+const MAX_SEGMENTS: usize = 4_000;
+/// 张角小于圆周这个比例（约 0.7°）的弧不画。
+const MIN_SWEEP: f32 = 0.002;
+/// 旭日图二进制格式中每段弧的字节数：id u32、类型 u32、圈 u32、起止角度各 f32。
+const SEGMENT_BYTES: usize = 20;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -215,6 +223,38 @@ pub fn treemap(
         for v in [r.x, r.y, r.w, r.h] {
             buf.extend_from_slice(&v.to_le_bytes());
         }
+    }
+    Ok(Response::new(buf))
+}
+
+/// 以目录为中心的旭日图，二进制格式，每段 [`SEGMENT_BYTES`] 字节（小端）：
+/// `id: u32, flags: u32, depth: u32, start: f32, end: f32`。
+/// flags 低 8 位是 [`Category::ALL`] 中的下标，第 8 位表示目录；
+/// depth 从 1 开始；角度是圆周的比例（0..1，从 12 点方向顺时针）。
+#[tauri::command]
+pub fn sunburst(id: NodeId, state: State<'_, AppState>) -> Result<Response, String> {
+    let scan = state.current()?;
+    let guard = scan.read();
+    let t = &*guard;
+    check(t, id)?;
+    let segments = t.sunburst(id, SUNBURST_DEPTH, MIN_SWEEP, MAX_SEGMENTS);
+    let dominants = scan.dominants(t, id, SUNBURST_DEPTH);
+    let mut buf = Vec::with_capacity(segments.len() * SEGMENT_BYTES);
+    for s in segments {
+        let is_dir = t.kind(s.id) == NodeKind::Dir;
+        let cat = match t.kind(s.id) {
+            NodeKind::Dir => dominants.get(&s.id).copied().unwrap_or(Category::Other),
+            NodeKind::File => {
+                let in_dev = t.parent(s.id).is_some_and(|p| in_dev_dir(t, p));
+                classify(t.name(s.id), in_dev)
+            }
+        };
+        buf.extend_from_slice(&s.id.to_le_bytes());
+        let flags = cat.index() as u32 | u32::from(is_dir) << 8;
+        buf.extend_from_slice(&flags.to_le_bytes());
+        buf.extend_from_slice(&s.depth.to_le_bytes());
+        buf.extend_from_slice(&s.start.to_le_bytes());
+        buf.extend_from_slice(&s.end.to_le_bytes());
     }
     Ok(Response::new(buf))
 }
