@@ -10,7 +10,16 @@
 
 use std::fmt;
 
-use crate::category::extension;
+/// `name` 的扩展名是否为 `ext`（`ext` 已是小写、不含点），不分配内存。
+fn has_extension(name: &str, ext: &str) -> bool {
+    let Some(dot) = name.len().checked_sub(ext.len() + 1) else {
+        return false;
+    };
+    dot > 0
+        && name.as_bytes()[dot] == b'.'
+        && name.is_char_boundary(dot + 1)
+        && name[dot + 1..].eq_ignore_ascii_case(ext)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Cond {
@@ -34,6 +43,8 @@ enum Cmp {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Query {
     conds: Vec<Cond>,
+    /// 是否有按名称包含 / 不包含的条件（需要把名称转成小写）。
+    has_text: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +89,10 @@ impl Query {
             };
             conds.push(cond);
         }
-        Ok(Self { conds })
+        let has_text = conds
+            .iter()
+            .any(|c| matches!(c, Cond::Contains(_) | Cond::NotContains(_)));
+        Ok(Self { conds, has_text })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -86,11 +100,12 @@ impl Query {
     }
 
     /// 该条目是否满足全部条件。
+    ///
+    /// 搜索会对每个节点调用一次：先判断不需要分配内存的条件，
+    /// 只有存在文字条件、且其他条件都满足时，才把名称转成小写。
     pub fn matches(&self, name: &str, is_dir: bool, size: u64) -> bool {
-        let lower = name.to_lowercase();
-        self.conds.iter().all(|c| match c {
-            Cond::Contains(s) => lower.contains(s.as_str()),
-            Cond::NotContains(s) => !lower.contains(s.as_str()),
+        let cheap = self.conds.iter().all(|c| match c {
+            Cond::Contains(_) | Cond::NotContains(_) => true,
             Cond::Size(cmp, n) => match cmp {
                 Cmp::Gt => size > *n,
                 Cmp::Ge => size >= *n,
@@ -98,9 +113,18 @@ impl Query {
                 Cmp::Le => size <= *n,
                 Cmp::Eq => size == *n,
             },
-            Cond::Ext(exts) => !is_dir && exts.iter().any(|e| *e == extension(name)),
+            Cond::Ext(exts) => !is_dir && exts.iter().any(|e| has_extension(name, e)),
             Cond::FilesOnly => !is_dir,
             Cond::FoldersOnly => is_dir,
+        });
+        if !cheap || !self.has_text {
+            return cheap;
+        }
+        let lower = name.to_lowercase();
+        self.conds.iter().all(|c| match c {
+            Cond::Contains(s) => lower.contains(s.as_str()),
+            Cond::NotContains(s) => !lower.contains(s.as_str()),
+            _ => true,
         })
     }
 }
@@ -191,6 +215,16 @@ mod tests {
         assert!(!q.matches("Program Files (x86)", true, 0));
         assert!(!q.matches("Program Files", false, 0));
         assert!(Query::parse("file:").unwrap().matches("a", false, 0));
+    }
+
+    #[test]
+    fn extension_matching() {
+        assert!(has_extension("a.ISO", "iso"));
+        assert!(has_extension("a.tar.gz", "gz"));
+        assert!(!has_extension("iso", "iso"));
+        assert!(!has_extension(".iso", "iso"));
+        assert!(!has_extension("a.xiso", "iso"));
+        assert!(!has_extension("报告.iso", "so"));
     }
 
     #[test]
