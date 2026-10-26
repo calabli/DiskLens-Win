@@ -20,9 +20,9 @@ pub mod scan;
 use std::fmt;
 use std::io;
 
-pub use scan::{MftScan, ReadAt, scan_reader};
+pub use scan::{MftScan, ReadAt, default_threads, scan_reader, scan_reader_with_threads};
 #[cfg(windows)]
-pub use scan::{open_volume, scan_volume};
+pub use scan::{open_volume, scan_volume, scan_volume_with_threads};
 
 #[derive(Debug)]
 pub enum Error {

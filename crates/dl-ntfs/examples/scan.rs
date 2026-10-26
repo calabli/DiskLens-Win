@@ -3,20 +3,28 @@
 //! ```text
 //! cargo run -p dl-ntfs --release --example scan -- D
 //! cargo run -p dl-ntfs --release --example scan -- D --compare
+//! cargo run -p dl-ntfs --release --example scan -- D --threads 1
 //! ```
 //!
 //! `--compare` 会再用普通遍历扫一遍同一个卷，对比两种方式得到的大小和文件数。
+//! `--threads N` 指定并发读取的线程数，默认按 CPU 核数（最多 8）。
 
 #[cfg(windows)]
 fn main() {
     use std::time::Instant;
 
-    let mut args = std::env::args().skip(1);
-    let letter = args.next().and_then(|s| s.chars().next()).unwrap_or('D');
-    let compare = args.any(|a| a == "--compare");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let letter = args.first().and_then(|s| s.chars().next()).unwrap_or('D');
+    let compare = args.iter().any(|a| a == "--compare");
+    let threads = args
+        .iter()
+        .position(|a| a == "--threads")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(dl_ntfs::default_threads);
 
     let started = Instant::now();
-    let scan = match dl_ntfs::scan_volume(letter, |_| {}) {
+    let scan = match dl_ntfs::scan_volume_with_threads(letter, threads, |_| {}) {
         Ok(scan) => scan,
         Err(e) => {
             eprintln!("MFT 扫描失败：{e}");
@@ -27,7 +35,10 @@ fn main() {
     let t = &scan.tree;
     let root = t.root();
 
-    println!("卷 {letter}:  MFT 直读用时 {:.2} 秒", elapsed.as_secs_f64());
+    println!(
+        "卷 {letter}:  MFT 直读用时 {:.2} 秒（{threads} 线程）",
+        elapsed.as_secs_f64()
+    );
     println!(
         "  记录 {} 条（簇 {} B，记录 {} B），损坏 {}，孤立 {}",
         scan.records_in_use,

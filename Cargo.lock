@@ -644,6 +644,7 @@ name = "dl-walk"
 version = "0.1.0"
 dependencies = [
  "dl-tree",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
