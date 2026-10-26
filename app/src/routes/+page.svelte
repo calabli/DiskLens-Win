@@ -5,13 +5,17 @@
   interface Entry {
     name: string;
     size: number;
+    allocated: number;
     files: number;
     isDir: boolean;
   }
 
   interface ScanSummary {
     root: string;
+    mode: "mft" | "walk";
+    fallbackReason: string | null;
     totalSize: number;
+    totalAllocated: number;
     fileCount: number;
     nodeCount: number;
     skipped: number;
@@ -59,7 +63,9 @@
     <p class="summary">
       {[
         summary.root,
+        summary.mode === "mft" ? "MFT 直读" : "普通遍历",
         formatSize(summary.totalSize),
+        `占用 ${formatSize(summary.totalAllocated)}`,
         `${summary.fileCount.toLocaleString()} 个文件`,
         `用时 ${(summary.elapsedMs / 1000).toFixed(1)} 秒`,
         summary.skipped > 0 ? `${summary.skipped} 个目录无权读取` : null,
@@ -67,6 +73,9 @@
         .filter(Boolean)
         .join(" · ")}
     </p>
+    {#if summary.fallbackReason}
+      <p class="notice">未能使用 MFT 直读（{summary.fallbackReason}），已改用普通遍历。</p>
+    {/if}
     <ul>
       {#each summary.children as child (child.name)}
         <li>
@@ -150,6 +159,13 @@
 
   .summary {
     color: #5f5e57;
+  }
+
+  .notice {
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #fbefd9;
+    color: #7a4b0c;
   }
 
   ul {

@@ -595,6 +595,7 @@ dependencies = [
 name = "disklens"
 version = "0.1.0"
 dependencies = [
+ "dl-ntfs",
  "dl-tree",
  "dl-walk",
  "serde",
@@ -624,6 +625,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "dl-ntfs"
+version = "0.1.0"
+dependencies = [
+ "dl-tree",
+ "dl-walk",
 ]
 
 [[package]]

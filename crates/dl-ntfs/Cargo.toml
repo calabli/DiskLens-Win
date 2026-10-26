@@ -1,0 +1,16 @@
+[package]
+name = "dl-ntfs"
+description = "DiskLens NTFS 直读：解析 MFT 构建文件树"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dl-tree.workspace = true
+
+[dev-dependencies]
+dl-walk.workspace = true
+
+[lints]
+workspace = true

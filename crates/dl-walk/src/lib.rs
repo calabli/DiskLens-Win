@@ -8,7 +8,7 @@ use std::fs::{self, Metadata};
 use std::io;
 use std::path::Path;
 
-use dl_tree::{FileTree, NodeId, NodeKind};
+use dl_tree::{FileTree, NodeId};
 
 /// 每处理这么多条目回调一次进度。
 const PROGRESS_EVERY: u64 = 10_000;
@@ -56,10 +56,11 @@ pub fn walk_with_progress(root: &Path, mut progress: impl FnMut(u64)) -> io::Res
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if meta.is_dir() {
-                let id = tree.add(dir_id, &name, NodeKind::Dir, 0);
+                let id = tree.add_dir(dir_id, &name);
                 stack.push((id, entry.path()));
             } else {
-                tree.add(dir_id, &name, NodeKind::File, meta.len());
+                // 普通遍历拿不到按簇的占用空间，暂以逻辑大小代替。
+                tree.add_file(dir_id, &name, meta.len(), meta.len());
             }
             seen += 1;
             if seen.is_multiple_of(PROGRESS_EVERY) {
