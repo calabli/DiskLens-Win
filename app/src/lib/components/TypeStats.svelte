@@ -13,26 +13,35 @@
 </script>
 
 <section class="card" aria-labelledby="types-title">
-  <h2 id="types-title">类型分布</h2>
+  <h2 id="types-title">存储空间</h2>
+  <p class="total">{formatSize(total)}</p>
+
+  <!-- 像 macOS“存储空间”那样的分段胶囊条，每段宽度与该类型的大小成正比。 -->
+  <div class="capsule" aria-hidden="true">
+    {#each stats as s (s.key)}
+      <span
+        style:flex-grow={s.size}
+        style:background={CATEGORIES[s.key].color}
+        title="{s.label} {formatSize(s.size)}"
+      ></span>
+    {/each}
+  </div>
+
   {#if stats.length === 0}
     <p class="muted">没有文件</p>
   {/if}
   <ul>
     {#each stats as s (s.key)}
       <li>
-        <div class="line">
-          <span class="swatch" style:background={CATEGORIES[s.key].color}></span>
-          <span class="label">{s.label}</span>
-          <span class="num">{formatSize(s.size)}</span>
-          <span class="num muted pct">{formatPercent(s.size, total)}</span>
-        </div>
-        <div class="bar" aria-hidden="true">
-          <span
-            style:width="{total > 0 ? (s.size / total) * 100 : 0}%"
-            style:background={CATEGORIES[s.key].color}
-          ></span>
-        </div>
-        <div class="files muted">{s.files.toLocaleString()} 个文件</div>
+        <span class="dot" style:background={CATEGORIES[s.key].color}></span>
+        <span class="label">
+          {s.label}
+          <span class="files">{s.files.toLocaleString()} 个文件</span>
+        </span>
+        <span class="size">
+          {formatSize(s.size)}
+          <span class="pct">{formatPercent(s.size, total)}</span>
+        </span>
       </li>
     {/each}
   </ul>
@@ -40,71 +49,84 @@
 
 <style>
   .card {
+    padding: 16px;
+    border-radius: var(--radius);
     background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 12px 14px;
+    box-shadow: var(--shadow);
   }
 
   h2 {
-    margin: 0 0 10px;
-    font-size: 14px;
-  }
-
-  ul {
     margin: 0;
-    padding: 0;
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    color: var(--ink-2);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
   }
 
-  .line {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .swatch {
-    width: 10px;
-    height: 10px;
-    border-radius: 3px;
-    flex: none;
-  }
-
-  .label {
-    flex: 1;
-  }
-
-  .num {
+  .total {
+    margin: 2px 0 12px;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     font-variant-numeric: tabular-nums;
   }
 
-  .pct {
-    width: 48px;
-    text-align: right;
+  .capsule {
+    display: flex;
+    gap: 2px;
+    height: 14px;
+    margin-bottom: 14px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--track);
   }
 
+  .capsule span {
+    flex-basis: 0;
+    min-width: 3px;
+  }
+
+  ul {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    margin-top: 4px;
+    border-radius: 50%;
+  }
+
+  .label {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .files,
+  .pct,
   .muted {
     color: var(--ink-2);
+    font-size: 11px;
   }
 
-  .bar {
-    height: 4px;
-    margin-top: 4px;
-    border-radius: 2px;
-    background: var(--track);
-    overflow: hidden;
-  }
-
-  .bar span {
-    display: block;
-    height: 100%;
-  }
-
-  .files {
-    margin-top: 2px;
-    font-size: 12px;
+  .size {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    font-variant-numeric: tabular-nums;
   }
 </style>

@@ -13,18 +13,37 @@ export type CategoryKey = (typeof CATEGORY_KEYS)[number];
 
 interface CategoryStyle {
   label: string;
-  /** 填充色。 */
+  /** CSS 颜色值（引用 app.css 里的变量，随深浅色切换）。 */
   color: string;
-  /** 在填充色上写字用的颜色，保证对比度。 */
-  ink: string;
 }
 
-export const CATEGORIES: Record<CategoryKey, CategoryStyle> = {
-  system: { label: "系统文件", color: "#8a94a6", ink: "#141413" },
-  app: { label: "应用程序", color: "#3a6ac8", ink: "#ffffff" },
-  dev: { label: "开发缓存", color: "#e08a3c", ink: "#141413" },
-  media: { label: "音视频", color: "#6a4bb8", ink: "#ffffff" },
-  package: { label: "安装包与镜像", color: "#d9b54a", ink: "#141413" },
-  document: { label: "文档与图片", color: "#277a68", ink: "#ffffff" },
-  other: { label: "其他", color: "#c9c4b8", ink: "#141413" },
+const LABELS: Record<CategoryKey, string> = {
+  system: "系统文件",
+  app: "应用程序",
+  dev: "开发缓存",
+  media: "音视频",
+  package: "安装包与镜像",
+  document: "文档与图片",
+  other: "其他",
 };
+
+export const CATEGORIES = Object.fromEntries(
+  CATEGORY_KEYS.map((k) => [k, { label: LABELS[k], color: `var(--cat-${k})` }]),
+) as Record<CategoryKey, CategoryStyle>;
+
+/** Canvas 不认 CSS 变量，绘制前把它们解析成具体颜色。 */
+export function resolvePalette(el: Element) {
+  const style = getComputedStyle(el);
+  const read = (name: string) => style.getPropertyValue(name).trim();
+  return {
+    fill: Object.fromEntries(CATEGORY_KEYS.map((k) => [k, read(`--cat-${k}`)])) as Record<
+      CategoryKey,
+      string
+    >,
+    ink: read("--tile-ink"),
+    gap: read("--tile-gap"),
+    accent: read("--accent"),
+  };
+}
+
+export type Palette = ReturnType<typeof resolvePalette>;

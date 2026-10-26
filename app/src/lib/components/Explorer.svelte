@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import {
     listChildren,
     nodeInfo,
@@ -29,6 +31,10 @@
   // 只取初始值是有意的：每次重新扫描，页面会用 {#key} 重建整个 Explorer。
   // svelte-ignore state_referenced_locally
   let dirId = $state(summary.rootId);
+  /** 列表滑入的方向：1 进入子目录，-1 返回，0 跳转。 */
+  let direction = $state(0);
+  let back = $state<number[]>([]);
+  let forward = $state<number[]>([]);
   let info = $state<NodeInfo | null>(null);
   let all = $state<ChildList>({ total: 0, entries: [] });
   let filtered = $state<ChildList | null>(null);
@@ -44,6 +50,7 @@
   const entries = $derived(new Map(all.entries.map((e) => [e.id, e])));
   const highlight = $derived(filtered ? new Set(filtered.entries.map((e) => e.id)) : null);
   const focus = $derived(entries.get(hoverId ?? selectedId ?? -1));
+  const title = $derived(info ? (info.parent == null ? summary.root : info.name) : "");
 
   // 进入目录：取节点信息、子项和类型分布。只保留最后一次请求的结果。
   let loadSeq = 0;
@@ -88,19 +95,47 @@
     return () => clearTimeout(timer);
   });
 
-  function open(id: number) {
+  /** 切换到目录 `id`；`dir` 决定列表滑入方向。 */
+  function go(id: number, dir: number, record = true) {
+    if (id === dirId) return;
+    if (record) {
+      back = [...back, dirId];
+      forward = [];
+    }
+    direction = dir;
     dirId = id;
     hoverId = null;
     selectedId = null;
     hits = null;
   }
 
+  function open(id: number) {
+    go(id, 1);
+  }
+
   function up() {
-    if (info?.parent != null) {
-      const from = dirId;
-      open(info.parent);
-      selectedId = from;
-    }
+    if (info?.parent == null) return;
+    const from = dirId;
+    go(info.parent, -1);
+    selectedId = from;
+  }
+
+  function goBack() {
+    const prev = back.at(-1);
+    if (prev === undefined) return;
+    back = back.slice(0, -1);
+    forward = [...forward, dirId];
+    const from = dirId;
+    go(prev, -1, false);
+    selectedId = from;
+  }
+
+  function goForward() {
+    const next = forward.at(-1);
+    if (next === undefined) return;
+    forward = forward.slice(0, -1);
+    back = [...back, dirId];
+    go(next, 1, false);
   }
 
   async function searchSubtree(event: SubmitEvent) {
@@ -118,16 +153,23 @@
 
   function reveal(hit: SearchHit) {
     if (hit.parent == null) return;
-    open(hit.parent);
+    go(hit.parent, 0);
     selectedId = hit.id;
     filter = "";
   }
 
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
-    if (event.key === "Backspace" && target.tagName !== "INPUT") {
+    if (target.tagName === "INPUT") return;
+    if (event.key === "Backspace" || (event.altKey && event.key === "ArrowUp")) {
       event.preventDefault();
       up();
+    } else if (event.altKey && event.key === "ArrowLeft") {
+      event.preventDefault();
+      goBack();
+    } else if (event.altKey && event.key === "ArrowRight") {
+      event.preventDefault();
+      goForward();
     }
   }
 </script>
@@ -135,89 +177,134 @@
 <svelte:window {onkeydown} />
 
 <div class="explorer">
-  <header>
-    <button type="button" class="brand" onclick={onhome} title="返回磁盘列表">DiskLens</button>
+  <header class="toolbar">
+    <div class="nav" role="group" aria-label="导航">
+      <button type="button" onclick={goBack} disabled={back.length === 0} aria-label="后退（Alt+←）"
+        ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+          ><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8"></path></svg
+        ></button
+      >
+      <button
+        type="button"
+        onclick={goForward}
+        disabled={forward.length === 0}
+        aria-label="前进（Alt+→）"
+        ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+          ><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8"></path></svg
+        ></button
+      >
+      <button
+        type="button"
+        onclick={up}
+        disabled={info?.parent == null}
+        aria-label="上一级（Backspace）"
+        ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+          ><path
+            d="M8 13V3M3.5 7.5 8 3l4.5 4.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          ></path></svg
+        ></button
+      >
+    </div>
+
+    <div class="title">
+      <h1>{title}</h1>
+      {#if info}
+        <span>{formatSize(info.size)} · {info.files.toLocaleString()} 个文件</span>
+      {/if}
+    </div>
+
     <form class="search" onsubmit={searchSubtree} role="search">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+        ><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"
+        ></circle><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.6"></path></svg
+      >
       <input
-        aria-label="筛选当前目录；按回车在整个子树中搜索"
-        placeholder="筛选当前目录，回车搜索全部子目录。例如 size:>1gb ext:iso;zip"
+        aria-label="筛选当前文件夹；按回车在所有子文件夹中搜索"
+        placeholder="搜索，如 size:>1gb ext:iso"
         bind:value={filter}
         spellcheck="false"
         autocomplete="off"
       />
     </form>
-    <button type="button" class="secondary" onclick={onrescan}>重新扫描</button>
-    <span class="badge" class:good={summary.mode === "mft"}>
+
+    <span class="mode" class:good={summary.mode === "mft"}>
       {summary.mode === "mft" ? "MFT 直读" : "普通遍历"}
     </span>
-  </header>
-
-  {#if summary.fallbackReason}
-    <p class="notice">
-      未能使用 MFT 直读（{summary.fallbackReason}），本次用的是普通遍历。以管理员身份运行可以更快、更准确。
-    </p>
-  {/if}
-  {#if filterError}
-    <p class="notice" role="alert">{filterError}</p>
-  {/if}
-  {#if error}
-    <p class="notice" role="alert">{error}</p>
-  {/if}
-
-  <nav class="crumbs" aria-label="当前位置">
+    <button type="button" class="tool" onclick={onrescan} aria-label="重新扫描" title="重新扫描"
+      ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
+        ><path
+          d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M12 1.5v3h-3"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        ></path></svg
+      ></button
+    >
     <button
       type="button"
-      class="up"
-      onclick={up}
-      disabled={info?.parent == null}
-      aria-label="返回上一级">↑</button
+      class="tool"
+      onclick={onhome}
+      aria-label="选择其他磁盘"
+      title="选择其他磁盘"
+      ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
+        ><rect
+          x="2"
+          y="4"
+          width="12"
+          height="8"
+          rx="2"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        ></rect><circle cx="11" cy="8" r="1" fill="currentColor"></circle></svg
+      ></button
     >
-    {#each info?.crumbs ?? [] as crumb, i (crumb.id)}
-      {#if i > 0}<span class="sep" aria-hidden="true">›</span>{/if}
-      <button
-        type="button"
-        class="crumb"
-        aria-current={crumb.id === dirId ? "location" : undefined}
-        onclick={() => open(crumb.id)}>{crumb.name}</button
-      >
-    {/each}
-    {#if info}
-      <span class="here">
-        {formatSize(info.size)} · {info.files.toLocaleString()} 个文件 · 占扫描范围 {formatPercent(
-          info.size,
-          summary.totalSize,
-        )}
-      </span>
-    {/if}
-  </nav>
+  </header>
+
+  {#each [summary.fallbackReason ? `未能使用 MFT 直读（${summary.fallbackReason}），本次是普通遍历。以管理员身份运行会更快、更准确。` : "", filterError, error].filter(Boolean) as message (message)}
+    <p class="banner" role="status">{message}</p>
+  {/each}
 
   <div class="body">
-    <section class="panel list" aria-label="子项列表">
+    <section class="panel list" aria-label="项目列表">
       {#if hits}
         <SearchResults query={searchedFor} {hits} onreveal={reveal} onclose={() => (hits = null)} />
       {:else}
-        <ChildListView
-          entries={filtered?.entries ?? all.entries}
-          total={filtered?.total ?? all.total}
-          parentSize={info?.size ?? 0}
-          {hoverId}
-          {selectedId}
-          onhover={(id) => (hoverId = id)}
-          onopen={open}
-          onselect={(id) => (selectedId = id)}
-        />
+        {#key dirId}
+          <div
+            class="slide"
+            in:fly={{ x: direction * 28, duration: direction === 0 ? 0 : 240, easing: cubicOut }}
+          >
+            <ChildListView
+              entries={filtered?.entries ?? all.entries}
+              total={filtered?.total ?? all.total}
+              parentSize={info?.size ?? 0}
+              {hoverId}
+              {selectedId}
+              onhover={(id) => (hoverId = id)}
+              onopen={open}
+              onselect={(id) => (selectedId = id)}
+            />
+          </div>
+        {/key}
       {/if}
     </section>
 
     <section class="panel map" aria-label="矩形树图">
-      <div class="info">
+      <div class="map-head">
         {#if focus}
-          <strong>{focus.name}</strong> · {formatSize(focus.size)} · 占 {formatPercent(
-            focus.size,
-            info?.size ?? 0,
-          )}{focus.isDir ? ` · ${focus.files.toLocaleString()} 个文件` : ""}
+          <strong>{focus.name}</strong>
+          <span
+            >{formatSize(focus.size)} · {formatPercent(focus.size, info?.size ?? 0)}{focus.isDir
+              ? ` · ${focus.files.toLocaleString()} 个文件`
+              : ""}</span
+          >
         {:else}
-          悬停查看详情，点击文件夹进入下一层，Backspace 返回上一级
+          <span>点按文件夹放大查看，Backspace 返回上一级</span>
         {/if}
       </div>
       <Treemap
@@ -238,12 +325,27 @@
   </div>
 
   <footer>
-    <span>{summary.root}</span>
-    <span>逻辑大小 {formatSize(summary.totalSize)}</span>
-    <span>占用 {formatSize(summary.totalAllocated)}</span>
-    <span>{summary.fileCount.toLocaleString()} 个文件</span>
-    <span>扫描用时 {(summary.elapsedMs / 1000).toFixed(1)} 秒</span>
-    {#if summary.skipped > 0}<span>{summary.skipped} 个目录无权读取</span>{/if}
+    <nav class="path" aria-label="路径">
+      {#each info?.crumbs ?? [] as crumb, i (crumb.id)}
+        {#if i > 0}<span class="sep" aria-hidden="true">›</span>{/if}
+        <button
+          type="button"
+          aria-current={crumb.id === dirId ? "location" : undefined}
+          onclick={() => go(crumb.id, crumb.id === dirId ? 0 : -1)}
+          ><svg viewBox="0 0 20 16" width="13" height="11" aria-hidden="true"
+            ><path d="M1 3a2 2 0 0 1 2-2h4.2l2 2H17a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z"
+            ></path></svg
+          >{i === 0 ? summary.root : crumb.name}</button
+        >
+      {/each}
+    </nav>
+    <div class="status">
+      {summary.fileCount.toLocaleString()} 个文件，逻辑大小 {formatSize(summary.totalSize)}，占用 {formatSize(
+        summary.totalAllocated,
+      )}，扫描用时 {(summary.elapsedMs / 1000).toFixed(1)} 秒{summary.skipped > 0
+        ? `，${summary.skipped} 个文件夹无权读取`
+        : ""}
+    </div>
   </footer>
 </div>
 
@@ -254,134 +356,126 @@
     height: 100vh;
   }
 
-  header {
+  .toolbar {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 16px;
-    background: var(--panel);
+    height: 52px;
+    padding: 0 14px;
+    background: var(--panel-2);
     border-bottom: 1px solid var(--line);
   }
 
-  .brand {
+  .nav {
+    display: flex;
+    gap: 2px;
+  }
+
+  .nav button,
+  .tool {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 28px;
     border: 0;
-    background: none;
-    padding: 0;
-    font: inherit;
-    font-size: 16px;
-    font-weight: 700;
-    color: inherit;
-    cursor: pointer;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--ink-2);
+    transition: background-color 0.12s;
+  }
+
+  .nav button:hover:not(:disabled),
+  .tool:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .nav button:disabled {
+    opacity: 0.3;
+  }
+
+  .title {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .title span {
+    color: var(--ink-2);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
   }
 
   .search {
-    flex: 1;
-    max-width: 560px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: min(320px, 32vw);
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 7px;
+    background: var(--field);
+    color: var(--ink-2);
+    transition: box-shadow 0.15s;
+  }
+
+  .search:focus-within {
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
   .search input {
-    width: 100%;
-    height: 36px;
-    box-sizing: border-box;
-    padding: 0 12px;
-    border: 1px solid var(--line-strong);
-    border-radius: 10px;
-    background: var(--bg);
-    font: inherit;
-    color: inherit;
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    outline: none;
+    color: var(--ink);
   }
 
-  .secondary {
-    height: 36px;
-    padding: 0 14px;
-    border: 1px solid var(--line-strong);
-    border-radius: 10px;
-    background: var(--panel);
-    font: inherit;
-    font-weight: 600;
-    color: inherit;
-    cursor: pointer;
+  .search input::placeholder {
+    color: var(--ink-3);
   }
 
-  .badge {
-    margin-left: auto;
-    padding: 4px 10px;
-    border-radius: 8px;
+  .mode {
+    padding: 3px 9px;
+    border-radius: 999px;
     background: var(--track);
-    font-size: 12px;
+    color: var(--ink-2);
+    font-size: 11px;
     font-weight: 600;
+    white-space: nowrap;
   }
 
-  .badge.good {
+  .mode.good {
     background: var(--good-bg);
     color: var(--good);
   }
 
-  .notice {
-    margin: 8px 16px 0;
+  .banner {
+    margin: 10px 14px 0;
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--warn-bg);
     color: var(--warn);
-  }
-
-  .crumbs {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px;
-    padding: 8px 16px;
-  }
-
-  .up {
-    width: 32px;
-    height: 32px;
-    margin-right: 6px;
-    border: 1px solid var(--line-strong);
-    border-radius: 8px;
-    background: var(--panel);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .up:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  .crumb {
-    padding: 4px 6px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    font: inherit;
-    font-size: 14px;
-    color: var(--accent);
-    cursor: pointer;
-  }
-
-  .crumb[aria-current] {
-    color: var(--ink);
-    font-weight: 600;
-  }
-
-  .sep {
-    color: var(--ink-3);
-  }
-
-  .here {
-    margin-left: auto;
-    color: var(--ink-2);
-    font-variant-numeric: tabular-nums;
   }
 
   .body {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr) 260px;
+    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr) 250px;
     gap: 12px;
-    padding: 0 16px 12px;
+    padding: 12px 14px;
   }
 
   .panel {
@@ -389,26 +483,38 @@
     flex-direction: column;
     min-height: 0;
     background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
     overflow: hidden;
   }
 
-  .map .info {
-    padding: 8px 12px;
+  .slide {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .map-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-height: 18px;
+    padding: 10px 14px 8px;
     color: var(--ink-2);
     font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
+  }
+
+  .map-head strong {
+    color: var(--ink);
+    overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .map .info strong {
-    color: var(--ink);
-  }
-
   .map :global(.treemap) {
-    margin: 0 8px 8px;
+    margin: 0 10px 10px;
   }
 
   .side {
@@ -418,19 +524,62 @@
 
   footer {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px 16px;
-    padding: 6px 16px;
-    background: var(--panel);
+    flex-direction: column;
+    background: var(--panel-2);
     border-top: 1px solid var(--line);
+    font-size: 11px;
+  }
+
+  .path {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 26px;
+    padding: 0 10px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  .path button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 5px;
+    background: none;
     color: var(--ink-2);
-    font-size: 12px;
+  }
+
+  .path button:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .path button[aria-current] {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .path svg {
+    fill: var(--cat-app);
+  }
+
+  .sep {
+    color: var(--ink-3);
+  }
+
+  .status {
+    padding: 4px 14px 5px;
+    color: var(--ink-2);
+    text-align: center;
     font-variant-numeric: tabular-nums;
   }
 
   @media (max-width: 1100px) {
     .body {
-      grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+      grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
     }
 
     .side {

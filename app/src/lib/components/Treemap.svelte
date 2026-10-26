@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { treemap, type Entry, type TreemapRect } from "$lib/api";
-  import { CATEGORIES } from "$lib/categories";
+  import { resolvePalette, type Palette } from "$lib/categories";
   import { formatSize } from "$lib/format";
 
   interface Props {
@@ -19,12 +20,50 @@
   let { dirId, entries, hoverId, selectedId, highlight, onhover, onopen, onselect }: Props =
     $props();
 
+  interface Box {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }
+
+  /**
+   * 缩放过渡。`outer` 是上一层的布局，`focus` 是其中被进入 / 刚离开的那一块，
+   * `inner` 是这一块里面的布局。z = 0 时看到整个 outer，z = 1 时 focus 铺满画布、看到 inner。
+   * 进入：z 从 0 到 1；返回：z 从 1 到 0。`kind = "fade"` 时做淡入淡出。
+   */
+  interface Transition {
+    kind: "zoom" | "fade";
+    outer: TreemapRect[];
+    inner: TreemapRect[] | null;
+    focus: Box;
+    from: number;
+    to: number;
+    start: number;
+  }
+
+  const DURATION = 460;
+  const reduceMotion =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   let container: HTMLDivElement;
   let canvas: HTMLCanvasElement;
   let width = $state(0);
   let height = $state(0);
+  /** 当前显示的布局（命中测试用）。 */
   let rects = $state<TreemapRect[]>([]);
   let error = $state("");
+  /** 重绘计数，深浅色切换等需要重画时递增。 */
+  let repaint = $state(0);
+  /** 已拿到布局的目录，用来判断“空文件夹”提示。 */
+  let loadedDir = $state(-1);
+
+  // 以下不是响应式状态：动画逐帧读写。
+  let shownDir = -1;
+  let layoutSize = { w: 0, h: 0 };
+  let transition: Transition | null = null;
+  let frame = 0;
+  let palette: Palette | null = null;
 
   $effect(() => {
     const ro = new ResizeObserver(([e]) => {
@@ -32,10 +71,20 @@
       height = Math.floor(e.contentRect.height);
     });
     ro.observe(container);
-    return () => ro.disconnect();
+    const scheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const onScheme = () => {
+      palette = null;
+      repaint++;
+    };
+    scheme.addEventListener("change", onScheme);
+    return () => {
+      ro.disconnect();
+      scheme.removeEventListener("change", onScheme);
+      cancelAnimationFrame(frame);
+    };
   });
 
-  // 目录或尺寸变化后向 Rust 要布局；拖动窗口时稍作防抖，只保留最后一次的结果。
+  // 目录或尺寸变化：向 Rust 要新布局，并决定用哪种过渡。
   let request = 0;
   $effect(() => {
     const id = dirId;
@@ -43,23 +92,130 @@
     const h = height;
     if (w < 10 || h < 10) return;
     const mine = ++request;
-    const timer = setTimeout(async () => {
-      try {
-        const r = await treemap(id, w, h);
-        if (mine === request) {
-          rects = r;
+    const navigating = id !== shownDir;
+    const previous = untrack(() => rects);
+    const from = shownDir;
+    const sameSize = layoutSize.w === w && layoutSize.h === h;
+    const animate = navigating && sameSize && !reduceMotion && previous.length > 0;
+
+    // 进入子目录：旧布局就在手上，立即开始放大，不必等新布局。
+    const focus = animate ? previous.find((r) => r.id === id) : undefined;
+    if (focus) {
+      begin({ kind: "zoom", outer: previous, inner: null, focus, from: 0, to: 1 });
+    }
+
+    // 尺寸变化时稍作防抖；切换目录时立即请求。
+    const timer = setTimeout(
+      async () => {
+        try {
+          const next = await treemap(id, w, h);
+          if (mine !== request) return;
+          if (focus && transition?.kind === "zoom" && transition.to === 1) {
+            transition.inner = next;
+          } else if (animate) {
+            const back = next.find((r) => r.id === from);
+            begin(
+              back
+                ? { kind: "zoom", outer: next, inner: previous, focus: back, from: 1, to: 0 }
+                : { kind: "fade", outer: next, inner: previous, focus: full(), from: 0, to: 1 },
+            );
+          }
+          rects = next;
+          shownDir = id;
+          loadedDir = id;
+          layoutSize = { w, h };
           error = "";
+          if (!transition) paint();
+        } catch (e) {
+          if (mine === request) error = String(e);
         }
-      } catch (e) {
-        if (mine === request) error = String(e);
-      }
-    }, 50);
+      },
+      navigating ? 0 : 60,
+    );
     return () => clearTimeout(timer);
   });
 
+  // 静态重绘：悬停、选中、筛选、名称或配色变化时。
   $effect(() => {
-    draw(rects, width, height, hoverId, selectedId, highlight);
+    void [rects, width, height, hoverId, selectedId, highlight, entries, repaint];
+    if (!transition) untrack(paint);
   });
+
+  function full(): Box {
+    return { x: 0, y: 0, w: width, h: height };
+  }
+
+  function begin(t: Omit<Transition, "start">) {
+    transition = { ...t, start: performance.now() };
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(tick);
+  }
+
+  /** 先快后慢，接近 macOS 的缩放手感。 */
+  function ease(p: number) {
+    return 1 - Math.pow(1 - p, 4);
+  }
+
+  function tick(now: number) {
+    const t = transition;
+    if (!t) return;
+    const p = Math.min(1, (now - t.start) / DURATION);
+    const z = t.from + (t.to - t.from) * ease(p);
+    paint(z);
+    // 放大结束时如果新布局还没到，停在放大状态等它。
+    const waiting = t.kind === "zoom" && t.to === 1 && t.inner === null;
+    if (p < 1 || waiting) {
+      frame = requestAnimationFrame(tick);
+    } else {
+      transition = null;
+      paint();
+    }
+  }
+
+  function ensureCanvas(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    const dpr = window.devicePixelRatio || 1;
+    const pw = Math.round(w * dpr);
+    const ph = Math.round(h * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+  }
+
+  function tilePath(ctx: CanvasRenderingContext2D, b: Box, inset: number) {
+    const x = b.x + inset;
+    const y = b.y + inset;
+    const w = b.w - 2 * inset;
+    const h = b.h - 2 * inset;
+    ctx.beginPath();
+    if (w <= 0 || h <= 0) return false;
+    const radius = Math.min(7, w / 4, h / 4);
+    if (radius < 1) ctx.rect(x, y, w, h);
+    else ctx.roundRect(x, y, w, h, radius);
+    return true;
+  }
+
+  function drawTiles(
+    ctx: CanvasRenderingContext2D,
+    list: TreemapRect[],
+    map: (r: TreemapRect) => Box,
+    alpha: number,
+    pal: Palette,
+    dim: Set<number> | null,
+  ) {
+    for (const r of list) {
+      const b = map(r);
+      if (b.w < 0.5 || b.h < 0.5) continue;
+      ctx.globalAlpha = alpha * (dim && !dim.has(r.id) ? 0.22 : 1);
+      ctx.fillStyle = pal.fill[r.category];
+      if (tilePath(ctx, b, b.w > 6 && b.h > 6 ? 1.5 : 0.5)) ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
 
   function ellipsize(ctx: CanvasRenderingContext2D, text: string, max: number): string {
     if (ctx.measureText(text).width <= max) return text;
@@ -73,61 +229,89 @@
     return lo > 0 ? text.slice(0, lo) + "…" : "";
   }
 
-  function draw(
-    list: TreemapRect[],
-    w: number,
-    h: number,
-    hover: number | null,
-    selected: number | null,
-    only: Set<number> | null,
-  ) {
-    if (!canvas || w === 0 || h === 0) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
+  /** 画一帧。`z` 为 undefined 时画静态画面（带标签、悬停和选中）。 */
+  function paint(z?: number) {
+    if (!canvas || width === 0 || height === 0) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+    palette ??= resolvePalette(container);
+    const pal = palette;
+    ensureCanvas(ctx, width, height);
+    const area = full();
+    const t = transition;
+
+    if (t && z !== undefined) {
+      if (t.kind === "fade") {
+        if (t.inner) drawTiles(ctx, t.inner, (r) => r, 1 - z, pal, null);
+        drawTiles(ctx, t.outer, (r) => r, z, pal, null);
+        return;
+      }
+      // 视口从整个画布插值到 focus，再把视口映射回整个画布。
+      const view: Box = {
+        x: t.focus.x * z,
+        y: t.focus.y * z,
+        w: area.w + (t.focus.w - area.w) * z,
+        h: area.h + (t.focus.h - area.h) * z,
+      };
+      const sx = area.w / view.w;
+      const sy = area.h / view.h;
+      const toScreen = (r: Box): Box => ({
+        x: (r.x - view.x) * sx,
+        y: (r.y - view.y) * sy,
+        w: r.w * sx,
+        h: r.h * sy,
+      });
+      drawTiles(ctx, t.outer, toScreen, 1, pal, null);
+      if (t.inner) {
+        const slot = toScreen(t.focus);
+        const into = (r: Box): Box => ({
+          x: slot.x + (r.x / area.w) * slot.w,
+          y: slot.y + (r.y / area.h) * slot.h,
+          w: (r.w / area.w) * slot.w,
+          h: (r.h / area.h) * slot.h,
+        });
+        const fade = Math.min(1, Math.max(0, (z - 0.35) / 0.65));
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = pal.gap;
+        if (tilePath(ctx, slot, 1.5)) ctx.fill();
+        drawTiles(ctx, t.inner, into, fade, pal, null);
+      }
+      return;
+    }
+
+    drawTiles(ctx, rects, (r) => r, 1, pal, highlight);
     ctx.textBaseline = "top";
-
-    for (const r of list) {
-      const style = CATEGORIES[r.category];
-      const gap = r.w > 4 && r.h > 4 ? 1 : 0;
-      ctx.globalAlpha = only && !only.has(r.id) ? 0.2 : 1;
-      ctx.fillStyle = style.color;
-      ctx.fillRect(r.x + gap, r.y + gap, r.w - 2 * gap, r.h - 2 * gap);
-
+    const family = getComputedStyle(container).fontFamily;
+    for (const r of rects) {
       const entry = entries.get(r.id);
-      if (entry && r.w > 48 && r.h > 20) {
-        ctx.fillStyle = style.ink;
-        ctx.font = "600 12px 'Segoe UI', 'Microsoft YaHei UI', sans-serif";
-        const name = ellipsize(ctx, entry.name, r.w - 12);
-        ctx.fillText(name, r.x + 6, r.y + 5);
-        if (r.h > 36) {
-          ctx.font = "12px 'Segoe UI', 'Microsoft YaHei UI', sans-serif";
-          ctx.fillText(formatSize(entry.size), r.x + 6, r.y + 21);
-        }
+      if (!entry || r.w < 52 || r.h < 24) continue;
+      if (highlight && !highlight.has(r.id)) continue;
+      ctx.fillStyle = pal.ink;
+      ctx.font = `600 12px ${family}`;
+      ctx.fillText(ellipsize(ctx, entry.name, r.w - 16), r.x + 8, r.y + 7);
+      if (r.h > 40) {
+        ctx.globalAlpha = 0.72;
+        ctx.font = `12px ${family}`;
+        ctx.fillText(formatSize(entry.size), r.x + 8, r.y + 23);
+        ctx.globalAlpha = 1;
       }
     }
-    ctx.globalAlpha = 1;
 
-    for (const [id, color, lineWidth] of [
-      [selected, "#141413", 3],
-      [hover, "#ffffff", 2],
-    ] as const) {
-      const r = id === null ? undefined : list.find((x) => x.id === id);
-      if (!r) continue;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
-      const inset = lineWidth / 2 + 1;
-      ctx.strokeRect(r.x + inset, r.y + inset, r.w - 2 * inset, r.h - 2 * inset);
+    const hovered = rects.find((r) => r.id === hoverId);
+    if (hovered && tilePath(ctx, hovered, 1.5)) {
+      ctx.fillStyle = "rgb(255 255 255 / 0.22)";
+      ctx.fill();
+    }
+    const selected = rects.find((r) => r.id === selectedId);
+    if (selected && tilePath(ctx, selected, 2.5)) {
+      ctx.strokeStyle = pal.accent;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
     }
   }
 
   function hit(event: MouseEvent): TreemapRect | undefined {
+    if (transition) return undefined;
     const box = canvas.getBoundingClientRect();
     const x = event.clientX - box.left;
     const y = event.clientY - box.top;
@@ -158,9 +342,9 @@
     {onclick}
   ></canvas>
   {#if error}
-    <p class="error" role="alert">{error}</p>
-  {:else if rects.length === 0 && width > 0}
-    <p class="empty">这个目录是空的</p>
+    <p class="note error" role="alert">{error}</p>
+  {:else if rects.length === 0 && width > 0 && loadedDir === dirId}
+    <p class="note">这个文件夹是空的</p>
   {/if}
 </div>
 
@@ -178,14 +362,13 @@
     cursor: pointer;
   }
 
-  .error,
-  .empty {
+  .note {
     position: absolute;
     inset: 0;
     display: grid;
     place-items: center;
     margin: 0;
-    color: var(--ink-2);
+    color: var(--ink-3);
   }
 
   .error {

@@ -15,14 +15,14 @@
 
 <div class="results">
   <div class="head">
-    <span>“{query}” 的搜索结果：最大的 {hits.length} 项</span>
-    <button type="button" onclick={onclose}>返回列表</button>
+    <span>“{query}”：最大的 {hits.length} 项</span>
+    <button type="button" onclick={onclose}>完成</button>
   </div>
   <ul>
-    {#each hits as hit (hit.id)}
+    {#each hits as hit, i (hit.id)}
       <li>
-        <button type="button" class="hit" onclick={() => onreveal(hit)}>
-          <span class="swatch" style:background={CATEGORIES[hit.category].color}></span>
+        <button type="button" class="hit" class:odd={i % 2 === 1} onclick={() => onreveal(hit)}>
+          <span class="dot" style:background={CATEGORIES[hit.category].color}></span>
           <span class="where">
             <span class="name">{hit.name}{hit.isDir ? "\\" : ""}</span>
             <span class="path">{hit.path}</span>
@@ -39,8 +39,8 @@
 <style>
   .results {
     display: flex;
-    flex-direction: column;
     flex: 1;
+    flex-direction: column;
     min-height: 0;
   }
 
@@ -49,21 +49,20 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 6px 12px;
+    padding: 6px 8px 6px 14px;
     border-bottom: 1px solid var(--line);
     color: var(--ink-2);
     font-size: 12px;
   }
 
   .head button {
-    height: 28px;
-    padding: 0 10px;
-    border: 1px solid var(--line-strong);
-    border-radius: 8px;
-    background: var(--panel);
-    font: inherit;
-    color: var(--ink);
-    cursor: pointer;
+    height: 24px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
   }
 
   ul {
@@ -71,33 +70,41 @@
     min-height: 0;
     overflow-y: auto;
     margin: 0;
-    padding: 0;
+    padding: 4px 6px;
     list-style: none;
   }
 
   .hit {
-    width: 100%;
     display: grid;
-    grid-template-columns: 12px minmax(0, 1fr) 80px;
-    gap: 8px;
+    grid-template-columns: 10px minmax(0, 1fr) 76px;
+    gap: 10px;
     align-items: center;
-    padding: 6px 12px;
+    width: 100%;
+    padding: 6px 8px;
     border: 0;
+    border-radius: 7px;
     background: transparent;
     text-align: left;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
+  }
+
+  .hit.odd {
+    background: var(--stripe);
   }
 
   .hit:hover {
-    background: var(--hover);
+    background: var(--accent);
+    color: var(--accent-ink);
   }
 
-  .swatch {
-    width: 10px;
-    height: 10px;
-    border-radius: 3px;
+  .hit:hover .path {
+    color: inherit;
+    opacity: 0.85;
+  }
+
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
   }
 
   .where {
@@ -115,7 +122,7 @@
 
   .path {
     color: var(--ink-2);
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .num {
