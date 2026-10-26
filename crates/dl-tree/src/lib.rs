@@ -60,6 +60,37 @@ impl FileTree {
         self.kind.is_empty()
     }
 
+    /// 树占用的堆内存字节数（按已分配容量计）。
+    pub fn heap_bytes(&self) -> usize {
+        fn cap<T>(v: &Vec<T>) -> usize {
+            v.capacity() * size_of::<T>()
+        }
+        cap(&self.parent)
+            + cap(&self.first_child)
+            + cap(&self.next_sibling)
+            + cap(&self.kind)
+            + cap(&self.size)
+            + cap(&self.allocated)
+            + cap(&self.files)
+            + cap(&self.name_start)
+            + cap(&self.name_len)
+            + self.names.capacity()
+    }
+
+    /// 释放 `Vec` 扩容留下的空闲容量。树在 `finalize` 之后不再增长。
+    fn shrink_to_fit(&mut self) {
+        self.parent.shrink_to_fit();
+        self.first_child.shrink_to_fit();
+        self.next_sibling.shrink_to_fit();
+        self.kind.shrink_to_fit();
+        self.size.shrink_to_fit();
+        self.allocated.shrink_to_fit();
+        self.files.shrink_to_fit();
+        self.name_start.shrink_to_fit();
+        self.name_len.shrink_to_fit();
+        self.names.shrink_to_fit();
+    }
+
     /// 在 `parent` 下加入一个目录。
     ///
     /// # Panics
@@ -123,7 +154,7 @@ impl FileTree {
         id
     }
 
-    /// 把大小、占用空间和文件数逐级汇总到目录。整棵树建完后调用一次。
+    /// 把大小、占用空间和文件数逐级汇总到目录，并释放多余容量。整棵树建完后调用一次。
     pub fn finalize(&mut self) {
         if self.finalized {
             return;
@@ -134,6 +165,7 @@ impl FileTree {
             self.allocated[p] += self.allocated[id];
             self.files[p] += self.files[id];
         }
+        self.shrink_to_fit();
         self.finalized = true;
     }
 
@@ -269,6 +301,19 @@ mod tests {
             .unwrap();
         assert_eq!(t.path(file), r"C:\Users\Docs\b.bin");
         assert_eq!(t.path(t.root()), r"C:\");
+    }
+
+    #[test]
+    fn finalize_releases_spare_capacity() {
+        let mut t = FileTree::new("root");
+        for i in 0..1_000 {
+            t.add_file(0, &format!("f{i}"), 1, 1);
+        }
+        let before = t.heap_bytes();
+        t.finalize();
+        assert!(t.heap_bytes() <= before);
+        // 每个节点的列加起来约 37 字节，再加上名称。
+        assert!(t.heap_bytes() < 1_001 * 48, "{}", t.heap_bytes());
     }
 
     #[test]

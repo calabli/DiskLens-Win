@@ -54,6 +54,13 @@ fn main() {
         gib(t.size(root)),
         gib(t.allocated(root))
     );
+    let mib = |b: usize| b as f64 / (1u64 << 20) as f64;
+    println!(
+        "  内存：文件树 {:.1} MiB（每百万节点 {:.1} MiB），进程峰值 {:.1} MiB",
+        mib(t.heap_bytes()),
+        mib(t.heap_bytes()) / t.len() as f64 * 1e6,
+        mib(peak_working_set())
+    );
     println!("  最大的 10 项：");
     for id in t.children_by_size(root).into_iter().take(10) {
         println!("    {:>12}  {}", gib(t.size(id)), t.name(id));
@@ -85,6 +92,26 @@ fn main() {
                 other.map_or("-".into(), |s| s.to_string())
             );
         }
+    }
+}
+
+/// 进程至今的峰值工作集（物理内存）字节数。
+#[cfg(windows)]
+fn peak_working_set() -> usize {
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    // SAFETY: PROCESS_MEMORY_COUNTERS 是纯数据结构，全零是合法初值。
+    let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+    let size = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    // SAFETY: 当前进程的伪句柄总是有效；counters 是大小如实传入的可写结构体。
+    let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, size) };
+    if ok != 0 {
+        counters.PeakWorkingSetSize
+    } else {
+        0
     }
 }
 
