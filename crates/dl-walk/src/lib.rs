@@ -1,14 +1,24 @@
 //! 普通目录遍历。
 //!
 //! 逐个打开目录读取条目，适用于 MFT 直读不可用的场合（非 NTFS 卷、网络盘、未提权）。
+//! 多个线程同时读不同的目录，最后按目录逐层组装成树，结果与单线程一致。
+//!
 //! 不跟随符号链接和连接点，避免重复统计和循环。读不了的目录计入
 //! [`WalkResult::skipped`] 后继续，不中断整次扫描。
+//!
+//! 占用空间：Windows 上用 `GetCompressedFileSizeW` 取实际占用（压缩、稀疏文件都准确），
+//! 再按簇向上取整。很小的文件在 NTFS 上可能直接存在 MFT 记录里、不占簇，这里会多算
+//! 一个簇；MFT 直读没有这个误差。
 
+use std::collections::VecDeque;
 use std::fs::{self, Metadata};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex};
+use std::thread;
 
-use dl_tree::{FileTree, NodeId, NodeKind};
+use dl_tree::{FileTree, NodeId};
 
 /// 每处理这么多条目回调一次进度。
 const PROGRESS_EVERY: u64 = 10_000;
@@ -22,11 +32,45 @@ pub struct WalkResult {
 
 /// 遍历 `root`，返回已汇总大小的文件树。
 pub fn walk(root: &Path) -> io::Result<WalkResult> {
-    walk_with_progress(root, |_| {})
+    walk_with_progress(root, &|_| {})
 }
 
-/// 同 [`walk`]，并定期以已处理的条目数调用 `progress`。
-pub fn walk_with_progress(root: &Path, mut progress: impl FnMut(u64)) -> io::Result<WalkResult> {
+/// 同 [`walk`]，并定期以已处理的条目数调用 `progress`（可能从任意工作线程调用）。
+pub fn walk_with_progress(root: &Path, progress: &(dyn Fn(u64) + Sync)) -> io::Result<WalkResult> {
+    walk_with_threads(root, default_threads(), progress)
+}
+
+/// 默认线程数：目录遍历以等待 I/O 为主，线程可以比 CPU 核数多一些。
+pub fn default_threads() -> usize {
+    thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .clamp(2, 16)
+}
+
+/// 一个目录读出来的条目。子目录用编号指向它自己的 [`Listing`]。
+enum Item {
+    Dir {
+        name: String,
+        id: usize,
+    },
+    File {
+        name: String,
+        size: u64,
+        allocated: u64,
+    },
+}
+
+/// 待读的目录。`active` 是排队中加上正在读的目录数，归零即全部完成。
+struct Queue {
+    jobs: Vec<(usize, PathBuf)>,
+    active: usize,
+}
+
+pub fn walk_with_threads(
+    root: &Path,
+    threads: usize,
+    progress: &(dyn Fn(u64) + Sync),
+) -> io::Result<WalkResult> {
     let meta = fs::symlink_metadata(root)?;
     if !meta.is_dir() {
         return Err(io::Error::new(
@@ -35,42 +79,129 @@ pub fn walk_with_progress(root: &Path, mut progress: impl FnMut(u64)) -> io::Res
         ));
     }
 
-    let mut tree = FileTree::new(&root.to_string_lossy());
-    let mut skipped = 0;
-    let mut seen = 0u64;
-    let mut stack: Vec<(NodeId, std::path::PathBuf)> = vec![(tree.root(), root.to_path_buf())];
+    let cluster = sys::cluster_size(root);
+    let queue = Mutex::new(Queue {
+        jobs: vec![(0, root.to_path_buf())],
+        active: 1,
+    });
+    let ready = Condvar::new();
+    let next_id = AtomicUsize::new(1);
+    let seen = AtomicU64::new(0);
+    let skipped = AtomicU64::new(0);
 
-    while let Some((dir_id, dir_path)) = stack.pop() {
-        let entries = match fs::read_dir(&dir_path) {
-            Ok(entries) => entries,
-            Err(_) => {
-                skipped += 1;
-                continue;
-            }
-        };
-        for entry in entries.flatten() {
-            let Ok(meta) = entry.metadata() else { continue };
-            if is_link(&meta) {
-                continue;
-            }
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if meta.is_dir() {
-                let id = tree.add(dir_id, &name, NodeKind::Dir, 0);
-                stack.push((id, entry.path()));
-            } else {
-                tree.add(dir_id, &name, NodeKind::File, meta.len());
-            }
-            seen += 1;
-            if seen.is_multiple_of(PROGRESS_EVERY) {
-                progress(seen);
+    let listings: Vec<(usize, Vec<Item>)> = thread::scope(|s| {
+        let workers: Vec<_> = (0..threads.max(1))
+            .map(|_| {
+                s.spawn(|| {
+                    let mut out = Vec::new();
+                    while let Some((id, path)) = take_job(&queue, &ready) {
+                        let mut items = Vec::new();
+                        let mut subdirs = Vec::new();
+                        match fs::read_dir(&path) {
+                            Ok(entries) => {
+                                for entry in entries.flatten() {
+                                    let Ok(meta) = entry.metadata() else { continue };
+                                    if is_link(&meta) {
+                                        continue;
+                                    }
+                                    let name = entry.file_name().to_string_lossy().into_owned();
+                                    if meta.is_dir() {
+                                        let child = next_id.fetch_add(1, Ordering::Relaxed);
+                                        items.push(Item::Dir { name, id: child });
+                                        subdirs.push((child, entry.path()));
+                                    } else {
+                                        let size = meta.len();
+                                        let allocated =
+                                            sys::allocated_size(|| entry.path(), &meta, cluster);
+                                        items.push(Item::File {
+                                            name,
+                                            size,
+                                            allocated,
+                                        });
+                                    }
+                                    let n = seen.fetch_add(1, Ordering::Relaxed) + 1;
+                                    if n.is_multiple_of(PROGRESS_EVERY) {
+                                        progress(n);
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                skipped.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        out.push((id, items));
+                        finish_job(&queue, &ready, subdirs);
+                    }
+                    out
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().expect("walk worker panicked"))
+            .collect()
+    });
+
+    let tree = assemble(root, next_id.into_inner(), listings);
+    progress(seen.into_inner());
+    Ok(WalkResult {
+        tree,
+        skipped: skipped.into_inner(),
+    })
+}
+
+/// 取一个待读目录；队列空但还有目录在读时等待，全部完成时返回 `None`。
+fn take_job(queue: &Mutex<Queue>, ready: &Condvar) -> Option<(usize, PathBuf)> {
+    let mut q = queue.lock().expect("walk queue poisoned");
+    loop {
+        if let Some(job) = q.jobs.pop() {
+            return Some(job);
+        }
+        if q.active == 0 {
+            return None;
+        }
+        q = ready.wait(q).expect("walk queue poisoned");
+    }
+}
+
+/// 一个目录读完：把它的子目录放进队列，并唤醒等待的线程。
+fn finish_job(queue: &Mutex<Queue>, ready: &Condvar, subdirs: Vec<(usize, PathBuf)>) {
+    let mut q = queue.lock().expect("walk queue poisoned");
+    q.active += subdirs.len();
+    q.jobs.extend(subdirs);
+    q.active -= 1;
+    drop(q);
+    ready.notify_all();
+}
+
+/// 从根目录开始逐层展开，保证父节点先于子节点加入树。
+fn assemble(root: &Path, dirs: usize, listings: Vec<(usize, Vec<Item>)>) -> FileTree {
+    let mut by_id: Vec<Option<Vec<Item>>> = (0..dirs).map(|_| None).collect();
+    for (id, items) in listings {
+        by_id[id] = Some(items);
+    }
+
+    let mut tree = FileTree::new(&root.to_string_lossy());
+    let mut pending: VecDeque<(usize, NodeId)> = VecDeque::from([(0, tree.root())]);
+    while let Some((id, node)) = pending.pop_front() {
+        for item in by_id[id].take().unwrap_or_default() {
+            match item {
+                Item::Dir { name, id } => {
+                    let child = tree.add_dir(node, &name);
+                    pending.push_back((id, child));
+                }
+                Item::File {
+                    name,
+                    size,
+                    allocated,
+                } => {
+                    tree.add_file(node, &name, size, allocated);
+                }
             }
         }
     }
-
     tree.finalize();
-    progress(seen);
-    Ok(WalkResult { tree, skipped })
+    tree
 }
 
 /// 符号链接和连接点（以及其他重解析点）都不跟随。
@@ -87,16 +218,132 @@ fn is_link(meta: &Metadata) -> bool {
     }
 }
 
+#[cfg(windows)]
+mod sys {
+    //! 占用空间相关的 Windows API。
+
+    use std::fs::Metadata;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::MetadataExt;
+    use std::path::{Path, PathBuf};
+
+    use windows_sys::Win32::Foundation::{GetLastError, NO_ERROR};
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetCompressedFileSizeW, GetDiskFreeSpaceW, GetVolumePathNameW, INVALID_FILE_SIZE,
+    };
+
+    /// 拿不到簇大小时的默认值，也是 NTFS 最常见的簇大小。
+    const DEFAULT_CLUSTER: u64 = 4096;
+
+    /// 以 0 结尾的 UTF-16 路径。超过 MAX_PATH 的绝对路径加上 `\\?\` 前缀。
+    fn wide(path: &Path) -> Vec<u16> {
+        let s = path.as_os_str();
+        let mut out: Vec<u16> = Vec::with_capacity(s.len() + 8);
+        if s.len() >= 248 && path.is_absolute() {
+            let lossy = path.to_string_lossy();
+            if let Some(unc) = lossy.strip_prefix(r"\\") {
+                if !unc.starts_with(r"?\") {
+                    out.extend(r"\\?\UNC\".encode_utf16());
+                    out.extend(unc.encode_utf16());
+                    out.push(0);
+                    return out;
+                }
+            } else {
+                out.extend(r"\\?\".encode_utf16());
+            }
+        }
+        out.extend(s.encode_wide());
+        out.push(0);
+        out
+    }
+
+    /// `path` 所在卷的簇大小。
+    pub fn cluster_size(path: &Path) -> u64 {
+        let p = wide(path);
+        let mut volume = [0u16; 512];
+        let mut spc = 0u32;
+        let mut bps = 0u32;
+        let mut free = 0u32;
+        let mut total = 0u32;
+        // SAFETY: p 以 0 结尾并在调用期间有效；volume 是长度如实传入的可写缓冲区；
+        // 四个输出参数都是有效的可写指针。
+        let ok = unsafe {
+            GetVolumePathNameW(p.as_ptr(), volume.as_mut_ptr(), volume.len() as u32) != 0
+                && GetDiskFreeSpaceW(volume.as_ptr(), &mut spc, &mut bps, &mut free, &mut total)
+                    != 0
+        };
+        let cluster = u64::from(spc) * u64::from(bps);
+        if ok && cluster > 0 {
+            cluster
+        } else {
+            DEFAULT_CLUSTER
+        }
+    }
+
+    /// 文件实际占用的磁盘空间，按簇向上取整。
+    ///
+    /// 只有压缩或稀疏文件才需要问系统（每次都要按路径打开文件，很慢），
+    /// 其他文件的占用就是逻辑大小按簇取整。`path` 只在需要时才生成。
+    pub fn allocated_size(path: impl FnOnce() -> PathBuf, meta: &Metadata, cluster: u64) -> u64 {
+        const FILE_ATTRIBUTE_SPARSE_FILE: u32 = 0x200;
+        const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x800;
+        let size = meta.len();
+        let bytes = if meta.file_attributes()
+            & (FILE_ATTRIBUTE_SPARSE_FILE | FILE_ATTRIBUTE_COMPRESSED)
+            != 0
+        {
+            compressed_size(&path()).unwrap_or(size)
+        } else {
+            size
+        };
+        bytes.div_ceil(cluster) * cluster
+    }
+
+    /// 压缩、稀疏文件实际占用的字节数。
+    fn compressed_size(path: &Path) -> Option<u64> {
+        let p = wide(path);
+        let mut high = 0u32;
+        // SAFETY: p 以 0 结尾并在调用期间有效；high 是有效的可写指针。
+        let low = unsafe { GetCompressedFileSizeW(p.as_ptr(), &mut high) };
+        // INVALID_FILE_SIZE 也可能是合法的低 32 位，要再看错误码。
+        // SAFETY: GetLastError 没有前置条件。
+        let failed = low == INVALID_FILE_SIZE && unsafe { GetLastError() } != NO_ERROR;
+        (!failed).then(|| (u64::from(high) << 32) | u64::from(low))
+    }
+}
+
+#[cfg(not(windows))]
+mod sys {
+    use std::fs::Metadata;
+    use std::path::{Path, PathBuf};
+
+    pub fn cluster_size(_: &Path) -> u64 {
+        4096
+    }
+
+    pub fn allocated_size(_: impl FnOnce() -> PathBuf, meta: &Metadata, cluster: u64) -> u64 {
+        meta.len().div_ceil(cluster) * cluster
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
+    /// 测试目录放在仓库的 target 下（D 盘），不在系统临时目录（C 盘）里扫描。
     struct TempDir(PathBuf);
 
     impl TempDir {
         fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("dl-walk-{tag}-{}", std::process::id()));
+            // crates/dl-walk 往上两级是仓库根目录；不用 `..`，mklink 不认这种路径。
+            let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .unwrap();
+            let dir = repo
+                .join("target")
+                .join("test-tmp")
+                .join(format!("dl-walk-{tag}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).unwrap();
             Self(dir)
@@ -121,10 +368,44 @@ mod tests {
         assert_eq!(skipped, 0);
         assert_eq!(tree.size(tree.root()), 1_255);
         assert_eq!(tree.file_count(tree.root()), 3);
+        // 每个小文件至少占一个簇。
+        assert!(tree.allocated(tree.root()) >= 3 * 512);
 
         let top = tree.children_by_size(tree.root());
         assert_eq!(tree.name(top[0]), "a");
         assert_eq!(tree.size(top[0]), 1_250);
+    }
+
+    #[test]
+    fn many_threads_match_one_thread() {
+        let tmp = TempDir::new("threads");
+        for d in 0..20 {
+            let dir = tmp.0.join(format!("d{d}/sub{}", d % 3));
+            fs::create_dir_all(&dir).unwrap();
+            for f in 0..15 {
+                fs::write(dir.join(format!("f{f}.bin")), vec![0u8; d * 100 + f]).unwrap();
+            }
+        }
+        let flatten = |t: &FileTree| {
+            let mut v: Vec<(String, u64, u32)> = (0..t.len() as NodeId)
+                .map(|i| (t.path(i), t.size(i), t.file_count(i)))
+                .collect();
+            v.sort();
+            v
+        };
+        let one = walk_with_threads(&tmp.0, 1, &|_| {}).unwrap();
+        let many = walk_with_threads(&tmp.0, 8, &|_| {}).unwrap();
+        assert_eq!(flatten(&one.tree), flatten(&many.tree));
+        assert_eq!(one.tree.file_count(0), 300);
+    }
+
+    #[test]
+    fn reports_progress() {
+        let tmp = TempDir::new("progress");
+        fs::write(tmp.0.join("x"), b"1").unwrap();
+        let last = AtomicU64::new(0);
+        walk_with_progress(&tmp.0, &|n| last.store(n, Ordering::Relaxed)).unwrap();
+        assert_eq!(last.into_inner(), 1);
     }
 
     #[test]
@@ -152,5 +433,27 @@ mod tests {
 
         let result = walk(&tmp.0).unwrap();
         assert_eq!(result.tree.size(result.tree.root()), 4_096);
+    }
+
+    /// NTFS 压缩后的文件：逻辑大小不变，占用空间应明显变小。`compact` 不需要管理员权限。
+    #[cfg(windows)]
+    #[test]
+    fn compressed_file_reports_real_allocation() {
+        let tmp = TempDir::new("compressed");
+        let file = tmp.0.join("zeros.bin");
+        fs::write(&file, vec![0u8; 8 << 20]).unwrap();
+        let ok = std::process::Command::new("compact")
+            .args(["/c", "/q"])
+            .arg(&file)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "compact failed");
+
+        let result = walk(&tmp.0).unwrap();
+        let t = &result.tree;
+        assert_eq!(t.size(t.root()), 8 << 20);
+        assert!(t.allocated(t.root()) < 1 << 20, "{}", t.allocated(t.root()));
     }
 }

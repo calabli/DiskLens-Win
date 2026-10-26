@@ -9,6 +9,7 @@ rust-version = "1.90"
 license = "MIT"
 
 [workspace.dependencies]
+dl-ntfs = { path = "crates/dl-ntfs" }
 dl-tree = { path = "crates/dl-tree" }
 dl-walk = { path = "crates/dl-walk" }
 serde = { version = "1", features = ["derive"] }

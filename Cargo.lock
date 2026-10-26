@@ -595,6 +595,7 @@ dependencies = [
 name = "disklens"
 version = "0.1.0"
 dependencies = [
+ "dl-ntfs",
  "dl-tree",
  "dl-walk",
  "serde",
@@ -627,6 +628,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-ntfs"
+version = "0.1.0"
+dependencies = [
+ "dl-tree",
+ "dl-walk",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "dl-tree"
 version = "0.1.0"
 
@@ -635,6 +645,7 @@ name = "dl-walk"
 version = "0.1.0"
 dependencies = [
  "dl-tree",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

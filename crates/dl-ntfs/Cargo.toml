@@ -1,0 +1,23 @@
+[package]
+name = "dl-ntfs"
+description = "DiskLens NTFS 直读：解析 MFT 构建文件树"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dl-tree.workspace = true
+
+[dev-dependencies]
+dl-walk.workspace = true
+
+# 仅示例程序用来报告峰值内存。
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+] }
+
+[lints]
+workspace = true
