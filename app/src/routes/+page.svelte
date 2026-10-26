@@ -72,64 +72,28 @@
 {/if}
 
 <style>
-  :global(:root) {
-    --bg: #f4f3ef;
-    --panel: #ffffff;
-    --ink: #1c1c1a;
-    --ink-2: #5f5e57;
-    --ink-3: #8a877e;
-    --line: #e4e2dc;
-    --line-strong: #d9d6ce;
-    --track: #eceae4;
-    --hover: #f2f1ec;
-    --selected: #eaf0fc;
-    --accent: #2f6feb;
-    --good: #1d5c45;
-    --good-bg: #e3f1ea;
-    --warn: #7a4b0c;
-    --warn-bg: #fbefd9;
-    --danger: #8a2a1f;
-  }
-
-  :global(body) {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font:
-      13px/1.4 "Segoe UI",
-      "Microsoft YaHei UI",
-      system-ui,
-      sans-serif;
-  }
-
-  :global(html),
-  :global(body) {
-    height: 100%;
-  }
-
   .error {
     position: fixed;
-    top: 12px;
+    top: 14px;
     left: 50%;
     z-index: 10;
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     margin: 0;
-    padding: 10px 14px;
-    border-radius: 10px;
-    background: #f8e1de;
+    padding: 10px 10px 10px 16px;
+    border-radius: 12px;
+    background: var(--panel);
     color: var(--danger);
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+    box-shadow: var(--shadow-lift);
   }
 
   .error button {
+    padding: 4px 10px;
     border: 0;
-    background: none;
-    font: inherit;
-    font-weight: 600;
-    color: inherit;
-    cursor: pointer;
+    border-radius: 6px;
+    background: var(--field);
+    color: var(--ink);
   }
 </style>
