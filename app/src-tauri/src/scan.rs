@@ -15,6 +15,10 @@ use tauri::ipc::Channel;
 
 /// 两次进度推送之间至少间隔这么多毫秒，避免把前端淹没。
 const PROGRESS_INTERVAL_MS: u64 = 100;
+/// 边扫边看：两次推送顶层项目快照之间至少间隔这么多毫秒。
+const LIVE_INTERVAL_MS: u64 = 400;
+/// 快照里最多列出几个顶层项目（最大的）。
+const LIVE_ITEMS: usize = 40;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +44,21 @@ pub enum ScanEvent {
     },
     /// MFT：已解析的记录数；普通遍历：已处理的条目数。
     Progress { processed: u64, elapsed_ms: u64 },
+    /// 普通遍历中，各顶层项目目前累计的大小（最大的若干项，从大到小）。
+    Live {
+        items: Vec<LiveEntry>,
+        /// 目前累计的总大小（含没有列出的项目）。
+        total_size: u64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub files: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -214,7 +233,9 @@ fn run_scan(
 ) -> Result<Scanned, String> {
     let started = Instant::now();
     let last_sent = AtomicU64::new(0);
-    // 节流后推送进度；返回 false 表示要取消。
+    let live = dl_walk::Live::default();
+    let live_sent = AtomicU64::new(0);
+    // 节流后推送进度和顶层项目快照；返回 false 表示要取消。
     let report = |processed: u64| -> bool {
         let now = started.elapsed().as_millis() as u64;
         let last = last_sent.load(Ordering::Relaxed);
@@ -227,6 +248,14 @@ fn run_scan(
                 processed,
                 elapsed_ms: now,
             });
+        }
+        let last = live_sent.load(Ordering::Relaxed);
+        if now >= last + LIVE_INTERVAL_MS
+            && live_sent
+                .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+        {
+            send_live(events, &live);
         }
         !cancel.load(Ordering::Relaxed)
     };
@@ -259,7 +288,7 @@ fn run_scan(
         mode: ScanMode::Walk,
         fallback_reason: fallback_reason.clone(),
     });
-    let result = dl_walk::walk_with_progress(&PathBuf::from(&path), &report).map_err(|e| {
+    let result = dl_walk::walk_live(&PathBuf::from(&path), &report, &live).map_err(|e| {
         if e.kind() == std::io::ErrorKind::Interrupted {
             "已取消".to_string()
         } else {
@@ -274,6 +303,27 @@ fn run_scan(
         result.skipped,
         started,
     ))
+}
+
+/// 推送一次顶层项目快照；还没有任何项目时不推送（例如 MFT 直读）。
+fn send_live(events: &Channel<ScanEvent>, live: &dl_walk::Live) {
+    let mut items = live.snapshot();
+    if items.is_empty() {
+        return;
+    }
+    let total_size = items.iter().map(|i| i.size).sum();
+    items.sort_by_key(|i| std::cmp::Reverse(i.size));
+    let items = items
+        .into_iter()
+        .take(LIVE_ITEMS)
+        .map(|i| LiveEntry {
+            name: i.name,
+            is_dir: i.is_dir,
+            size: i.size,
+            files: i.files,
+        })
+        .collect();
+    let _ = events.send(ScanEvent::Live { items, total_size });
 }
 
 fn finish(

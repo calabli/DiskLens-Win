@@ -14,9 +14,18 @@ export interface Volume {
   free: number;
 }
 
+/** 边扫边看：一个顶层项目目前累计的大小。 */
+export interface LiveEntry {
+  name: string;
+  isDir: boolean;
+  size: number;
+  files: number;
+}
+
 export type ScanEvent =
   | { kind: "started"; mode: ScanMode; fallbackReason: string | null }
-  | { kind: "progress"; processed: number; elapsedMs: number };
+  | { kind: "progress"; processed: number; elapsedMs: number }
+  | { kind: "live"; items: LiveEntry[]; totalSize: number };
 
 export interface ScanSummary {
   root: string;

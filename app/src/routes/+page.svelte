@@ -5,6 +5,7 @@
     openCached,
     startScan,
     type CachedScan,
+    type LiveEntry,
     type ScanMode,
     type ScanSummary,
   } from "$lib/api";
@@ -21,6 +22,8 @@
   let fallbackReason = $state<string | null>(null);
   let processed = $state(0);
   let elapsedMs = $state(0);
+  let live = $state<LiveEntry[]>([]);
+  let liveTotal = $state(0);
   let summary = $state<ScanSummary | null>(null);
   let error = $state("");
   /** 每次扫描递增；用于让结果页在重新扫描后整个重建。 */
@@ -32,6 +35,8 @@
     fallbackReason = null;
     processed = 0;
     elapsedMs = 0;
+    live = [];
+    liveTotal = 0;
     error = "";
     const previous = phase;
     phase = "scanning";
@@ -40,6 +45,9 @@
         if (e.kind === "started") {
           mode = e.mode;
           fallbackReason = e.fallbackReason;
+        } else if (e.kind === "live") {
+          live = e.items;
+          liveTotal = e.totalSize;
         } else {
           processed = e.processed;
           elapsedMs = e.elapsedMs;
@@ -99,7 +107,16 @@
 {#if phase === "home"}
   <Home {cached} onscan={scan} onopen={open} />
 {:else if phase === "scanning"}
-  <ScanProgress path={scanPath} {mode} {fallbackReason} {processed} {elapsedMs} oncancel={cancel} />
+  <ScanProgress
+    path={scanPath}
+    {mode}
+    {fallbackReason}
+    {processed}
+    {elapsedMs}
+    {live}
+    {liveTotal}
+    oncancel={cancel}
+  />
 {:else if summary}
   {#key scanSeq}
     <Explorer {summary} onrescan={() => summary && scan(summary.root)} onhome={home} />

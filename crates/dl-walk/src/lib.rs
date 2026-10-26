@@ -44,6 +44,53 @@ pub fn walk_with_progress(
     walk_with_threads(root, default_threads(), progress)
 }
 
+/// 同 [`walk_with_progress`]，扫描过程中把每个顶层项目（根目录下的文件夹和文件）
+/// 目前累计的大小记到 `live` 里，界面可以随时取快照，边扫边看。
+pub fn walk_live(
+    root: &Path,
+    progress: &(dyn Fn(u64) -> bool + Sync),
+    live: &Live,
+) -> io::Result<WalkResult> {
+    run(root, default_threads(), progress, Some(live))
+}
+
+/// 一个顶层项目目前累计的大小。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveItem {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub allocated: u64,
+    pub files: u64,
+}
+
+/// 扫描过程中按顶层项目累计的大小，见 [`walk_live`]。
+#[derive(Debug, Default)]
+pub struct Live {
+    items: Mutex<Vec<LiveItem>>,
+}
+
+impl Live {
+    /// 当前各顶层项目的累计大小，顺序为发现的顺序。
+    pub fn snapshot(&self) -> Vec<LiveItem> {
+        self.items.lock().expect("live poisoned").clone()
+    }
+
+    fn add(&self, item: LiveItem) -> usize {
+        let mut items = self.items.lock().expect("live poisoned");
+        items.push(item);
+        items.len() - 1
+    }
+
+    fn grow(&self, index: usize, size: u64, allocated: u64, files: u64) {
+        let mut items = self.items.lock().expect("live poisoned");
+        let item = &mut items[index];
+        item.size += size;
+        item.allocated += allocated;
+        item.files += files;
+    }
+}
+
 /// 默认线程数：目录遍历以等待 I/O 为主，线程可以比 CPU 核数多一些。
 pub fn default_threads() -> usize {
     thread::available_parallelism()
@@ -64,9 +111,12 @@ enum Item {
     },
 }
 
+/// 一个待读的目录：编号、路径、所属顶层项目在 [`Live`] 里的下标（根目录本身为 `None`）。
+type Job = (usize, PathBuf, Option<usize>);
+
 /// 待读的目录。`active` 是排队中加上正在读的目录数，归零即全部完成。
 struct Queue {
-    jobs: Vec<(usize, PathBuf)>,
+    jobs: Vec<Job>,
     active: usize,
 }
 
@@ -74,6 +124,15 @@ pub fn walk_with_threads(
     root: &Path,
     threads: usize,
     progress: &(dyn Fn(u64) -> bool + Sync),
+) -> io::Result<WalkResult> {
+    run(root, threads, progress, None)
+}
+
+fn run(
+    root: &Path,
+    threads: usize,
+    progress: &(dyn Fn(u64) -> bool + Sync),
+    live: Option<&Live>,
 ) -> io::Result<WalkResult> {
     let meta = fs::symlink_metadata(root)?;
     if !meta.is_dir() {
@@ -85,7 +144,7 @@ pub fn walk_with_threads(
 
     let cluster = sys::cluster_size(root);
     let queue = Mutex::new(Queue {
-        jobs: vec![(0, root.to_path_buf())],
+        jobs: vec![(0, root.to_path_buf(), None)],
         active: 1,
     });
     let ready = Condvar::new();
@@ -99,7 +158,7 @@ pub fn walk_with_threads(
             .map(|_| {
                 s.spawn(|| {
                     let mut out = Vec::new();
-                    while let Some((id, path)) = take_job(&queue, &ready) {
+                    while let Some((id, path, top)) = take_job(&queue, &ready) {
                         // 取消后仍要把排队的目录逐个标记完成，否则等待中的线程永远等不到结束。
                         if cancelled.load(Ordering::Relaxed) {
                             finish_job(&queue, &ready, Vec::new());
@@ -107,6 +166,8 @@ pub fn walk_with_threads(
                         }
                         let mut items = Vec::new();
                         let mut subdirs = Vec::new();
+                        // 这个目录里文件的合计，读完后一次性记到所属的顶层项目上。
+                        let (mut dir_size, mut dir_allocated, mut dir_files) = (0, 0, 0);
                         match fs::read_dir(&path) {
                             Ok(entries) => {
                                 for entry in entries.flatten() {
@@ -117,12 +178,39 @@ pub fn walk_with_threads(
                                     let name = entry.file_name().to_string_lossy().into_owned();
                                     if meta.is_dir() {
                                         let child = next_id.fetch_add(1, Ordering::Relaxed);
+                                        // 根目录下的文件夹各自成为一个顶层项目，更深的沿用父目录的。
+                                        let child_top = match (live, top) {
+                                            (Some(l), None) => Some(l.add(LiveItem {
+                                                name: name.clone(),
+                                                is_dir: true,
+                                                size: 0,
+                                                allocated: 0,
+                                                files: 0,
+                                            })),
+                                            _ => top,
+                                        };
                                         items.push(Item::Dir { name, id: child });
-                                        subdirs.push((child, entry.path()));
+                                        subdirs.push((child, entry.path(), child_top));
                                     } else {
                                         let size = meta.len();
                                         let allocated =
                                             sys::allocated_size(|| entry.path(), &meta, cluster);
+                                        match (live, top) {
+                                            (Some(l), None) => {
+                                                l.add(LiveItem {
+                                                    name: name.clone(),
+                                                    is_dir: false,
+                                                    size,
+                                                    allocated,
+                                                    files: 1,
+                                                });
+                                            }
+                                            _ => {
+                                                dir_size += size;
+                                                dir_allocated += allocated;
+                                                dir_files += 1;
+                                            }
+                                        }
                                         items.push(Item::File {
                                             name,
                                             size,
@@ -141,6 +229,11 @@ pub fn walk_with_threads(
                             Err(_) => {
                                 skipped.fetch_add(1, Ordering::Relaxed);
                             }
+                        }
+                        if let (Some(l), Some(t)) = (live, top)
+                            && dir_files > 0
+                        {
+                            l.grow(t, dir_size, dir_allocated, dir_files);
                         }
                         out.push((id, items));
                         finish_job(&queue, &ready, subdirs);
@@ -167,7 +260,7 @@ pub fn walk_with_threads(
 }
 
 /// 取一个待读目录；队列空但还有目录在读时等待，全部完成时返回 `None`。
-fn take_job(queue: &Mutex<Queue>, ready: &Condvar) -> Option<(usize, PathBuf)> {
+fn take_job(queue: &Mutex<Queue>, ready: &Condvar) -> Option<Job> {
     let mut q = queue.lock().expect("walk queue poisoned");
     loop {
         if let Some(job) = q.jobs.pop() {
@@ -181,7 +274,7 @@ fn take_job(queue: &Mutex<Queue>, ready: &Condvar) -> Option<(usize, PathBuf)> {
 }
 
 /// 一个目录读完：把它的子目录放进队列，并唤醒等待的线程。
-fn finish_job(queue: &Mutex<Queue>, ready: &Condvar, subdirs: Vec<(usize, PathBuf)>) {
+fn finish_job(queue: &Mutex<Queue>, ready: &Condvar, subdirs: Vec<Job>) {
     let mut q = queue.lock().expect("walk queue poisoned");
     q.active += subdirs.len();
     q.jobs.extend(subdirs);
@@ -413,6 +506,44 @@ mod tests {
         let many = walk_with_threads(&tmp.0, 8, &|_| true).unwrap();
         assert_eq!(flatten(&one.tree), flatten(&many.tree));
         assert_eq!(one.tree.file_count(0), 300);
+    }
+
+    #[test]
+    fn live_totals_match_the_final_tree() {
+        let tmp = TempDir::new("live");
+        for d in 0..6 {
+            let dir = tmp.0.join(format!("d{d}/x/y"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(tmp.0.join(format!("d{d}/a.bin")), vec![0u8; d * 1_000]).unwrap();
+            fs::write(dir.join("b.bin"), vec![0u8; 77 + d]).unwrap();
+        }
+        fs::create_dir_all(tmp.0.join("empty")).unwrap();
+        fs::write(tmp.0.join("root.txt"), b"12345").unwrap();
+
+        let live = Live::default();
+        let result = walk_live(&tmp.0, &|_| true, &live).unwrap();
+        let t = &result.tree;
+        let mut got: Vec<(String, bool, u64, u64, u64)> = live
+            .snapshot()
+            .into_iter()
+            .map(|i| (i.name, i.is_dir, i.size, i.allocated, i.files))
+            .collect();
+        got.sort();
+        let mut want: Vec<(String, bool, u64, u64, u64)> = t
+            .children(t.root())
+            .map(|c| {
+                (
+                    t.name(c).to_string(),
+                    t.kind(c) == dl_tree::NodeKind::Dir,
+                    t.size(c),
+                    t.allocated(c),
+                    u64::from(t.file_count(c)),
+                )
+            })
+            .collect();
+        want.sort();
+        assert_eq!(got, want);
+        assert_eq!(got.len(), 8);
     }
 
     #[test]
