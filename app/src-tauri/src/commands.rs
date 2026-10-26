@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Response;
 
-use crate::scan::{AppState, Scanned};
+use crate::scan::AppState;
 
 /// 列表一次最多返回的子项数。
 const MAX_LIST: usize = 5_000;
@@ -83,11 +83,12 @@ pub struct SearchHit {
     category: &'static str,
 }
 
-fn check(scan: &Scanned, id: NodeId) -> Result<(), String> {
-    if (id as usize) < scan.tree.len() {
+/// 节点存在且仍挂在树上（没有被删除摘掉）。
+pub(crate) fn check(tree: &FileTree, id: NodeId) -> Result<(), String> {
+    if (id as usize) < tree.len() && (id == tree.root() || tree.parent(id).is_some()) {
         Ok(())
     } else {
-        Err("节点不存在，可能是扫描结果已更新".into())
+        Err("这个项目已不存在，可能已被删除或扫描结果已更新".into())
     }
 }
 
@@ -117,8 +118,9 @@ fn in_dev_dir(tree: &FileTree, id: NodeId) -> bool {
 #[tauri::command]
 pub fn node_info(id: NodeId, state: State<'_, AppState>) -> Result<NodeInfo, String> {
     let scan = state.current()?;
-    check(&scan, id)?;
-    let t = &scan.tree;
+    let guard = scan.read();
+    let t = &*guard;
+    check(t, id)?;
     let mut chain = vec![id];
     while let Some(p) = t.parent(*chain.last().expect("non-empty")) {
         chain.push(p);
@@ -151,10 +153,11 @@ pub fn list_children(
     state: State<'_, AppState>,
 ) -> Result<ChildList, String> {
     let scan = state.current()?;
-    check(&scan, id)?;
-    let t = &scan.tree;
+    let guard = scan.read();
+    let t = &*guard;
+    check(t, id)?;
     let query = Query::parse(filter.as_deref().unwrap_or("")).map_err(|e| e.to_string())?;
-    let breakdown = scan.breakdown(id);
+    let breakdown = scan.breakdown(t, id);
     let in_dev = in_dev_dir(t, id);
 
     let matched: Vec<NodeId> = t
@@ -192,9 +195,10 @@ pub fn treemap(
     state: State<'_, AppState>,
 ) -> Result<Response, String> {
     let scan = state.current()?;
-    check(&scan, id)?;
-    let t = &scan.tree;
-    let breakdown = scan.breakdown(id);
+    let guard = scan.read();
+    let t = &*guard;
+    check(t, id)?;
+    let breakdown = scan.breakdown(t, id);
     let in_dev = in_dev_dir(t, id);
     let area = Rect {
         x: 0.0,
@@ -219,8 +223,9 @@ pub fn treemap(
 #[tauri::command]
 pub fn type_stats(id: NodeId, state: State<'_, AppState>) -> Result<Vec<TypeStat>, String> {
     let scan = state.current()?;
-    check(&scan, id)?;
-    let total = scan.breakdown(id).total;
+    let guard = scan.read();
+    check(&guard, id)?;
+    let total = scan.breakdown(&guard, id).total;
     let mut stats: Vec<TypeStat> = Category::ALL
         .into_iter()
         .filter(|c| total.files[c.index()] > 0)
@@ -245,8 +250,9 @@ pub fn search(
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchHit>, String> {
     let scan = state.current()?;
-    check(&scan, id)?;
-    let t = &scan.tree;
+    let guard = scan.read();
+    let t = &*guard;
+    check(t, id)?;
     let query = Query::parse(&query).map_err(|e| e.to_string())?;
     if query.is_empty() {
         return Ok(Vec::new());

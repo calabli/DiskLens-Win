@@ -6,6 +6,8 @@
 
   interface Props {
     dirId: number;
+    /** 数据版本；删除文件后递增，促使重新取布局。 */
+    version: number;
     /** 当前目录子项，按 id 索引，用来取名称和大小。 */
     entries: Map<number, Entry>;
     hoverId: number | null;
@@ -17,8 +19,17 @@
     onselect: (id: number) => void;
   }
 
-  let { dirId, entries, hoverId, selectedId, highlight, onhover, onopen, onselect }: Props =
-    $props();
+  let {
+    dirId,
+    version,
+    entries,
+    hoverId,
+    selectedId,
+    highlight,
+    onhover,
+    onopen,
+    onselect,
+  }: Props = $props();
 
   interface Box {
     x: number;
@@ -90,6 +101,7 @@
     const id = dirId;
     const w = width;
     const h = height;
+    void version;
     if (w < 10 || h < 10) return;
     const mine = ++request;
     const navigating = id !== shownDir;

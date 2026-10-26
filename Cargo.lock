@@ -596,6 +596,7 @@ name = "disklens"
 version = "0.1.0"
 dependencies = [
  "dl-analyze",
+ "dl-clean",
  "dl-ntfs",
  "dl-tree",
  "dl-walk",
@@ -635,6 +636,15 @@ version = "0.1.0"
 dependencies = [
  "dl-tree",
  "dl-walk",
+]
+
+[[package]]
+name = "dl-clean"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "windows",
 ]
 
 [[package]]
