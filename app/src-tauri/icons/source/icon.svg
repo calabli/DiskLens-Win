@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2E9BFF"/>
+      <stop offset="1" stop-color="#0060DF"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <!-- 树图：大小不一的方块 -->
+  <g fill="#fff">
+    <rect x="200" y="200" width="356" height="624" rx="44"/>
+    <rect x="584" y="200" width="240" height="300" rx="44" opacity=".78"/>
+    <rect x="584" y="528" width="112" height="296" rx="36" opacity=".56"/>
+    <rect x="724" y="528" width="100" height="140" rx="30" opacity=".42"/>
+    <rect x="724" y="696" width="100" height="128" rx="30" opacity=".3"/>
+  </g>
+  <rect x="244" y="252" width="268" height="32" rx="16" fill="#0A84FF" opacity=".35"/>
+</svg>

@@ -26,6 +26,23 @@
   "bundle": {
     "active": true,
     "targets": ["msi", "nsis"],
+    "publisher": "DiskLens",
+    "copyright": "© 2026 DiskLens",
+    "category": "Utility",
+    "shortDescription": "Windows 磁盘空间分析与管理",
+    "longDescription": "直接读取 NTFS 主文件表，几秒内扫完整个磁盘，用树图找出占空间的文件并安全清理。",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      },
+      "wix": {
+        "language": "zh-CN"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

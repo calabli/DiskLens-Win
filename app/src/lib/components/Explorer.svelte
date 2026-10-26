@@ -13,6 +13,7 @@
     type NodeInfo,
     type ScanSummary,
     type SearchHit,
+    type SelectMode,
     type TypeStat,
   } from "$lib/api";
   import { formatPercent, formatSize } from "$lib/format";
@@ -32,6 +33,17 @@
   let { summary, onrescan, onhome }: Props = $props();
 
   const SEARCH_LIMIT = 500;
+  const LAYOUT_KEY = "disklens.panels";
+
+  /** 读取上次的侧栏展开状态；存储不可用时用默认值。 */
+  function loadPanels(): { list: boolean; side: boolean } {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}");
+      return { list: saved.list !== false, side: saved.side !== false };
+    } catch {
+      return { list: true, side: true };
+    }
+  }
 
   // 只取初始值是有意的：每次重新扫描，页面会用 {#key} 重建整个 Explorer。
   // svelte-ignore state_referenced_locally
@@ -45,7 +57,11 @@
   let filtered = $state<ChildList | null>(null);
   let stats = $state<TypeStat[]>([]);
   let hoverId = $state<number | null>(null);
-  let selectedId = $state<number | null>(null);
+  /** 选中的项目，按选中顺序；最后一项是焦点。 */
+  let selection = $state<number[]>([]);
+  /** Shift 连续选择的起点。 */
+  let anchor = $state<number | null>(null);
+  let panels = $state(loadPanels());
   let filter = $state("");
   let filterError = $state("");
   let hits = $state<SearchHit[] | null>(null);
@@ -61,7 +77,13 @@
 
   const entries = $derived(new Map(all.entries.map((e) => [e.id, e])));
   const highlight = $derived(filtered ? new Set(filtered.entries.map((e) => e.id)) : null);
-  const focus = $derived(entries.get(hoverId ?? selectedId ?? -1));
+  const visible = $derived(filtered?.entries ?? all.entries);
+  const selected = $derived(new Set(selection));
+  const selectedId = $derived(selection.at(-1) ?? null);
+  const selectedSize = $derived(
+    selection.reduce((sum, id) => sum + (entries.get(id)?.size ?? 0), 0),
+  );
+  const focus = $derived(entries.get(hoverId ?? (selection.length === 1 ? selection[0] : -1)));
   const title = $derived(info ? (info.parent == null ? summary.root : info.name) : "");
 
   // 进入目录：取节点信息、子项和类型分布。只保留最后一次请求的结果。
@@ -109,6 +131,37 @@
     return () => clearTimeout(timer);
   });
 
+  $effect(() => {
+    const value = JSON.stringify(panels);
+    try {
+      localStorage.setItem(LAYOUT_KEY, value);
+    } catch {
+      // 存不下也不影响使用。
+    }
+  });
+
+  /** 选中 `id`；`only` 只选它，`toggle` 加选或取消，`range` 从起点连续选到它。 */
+  function select(id: number, mode: SelectMode) {
+    if (mode === "toggle") {
+      selection = selection.includes(id) ? selection.filter((x) => x !== id) : [...selection, id];
+      anchor = id;
+      return;
+    }
+    const from = visible.findIndex((e) => e.id === anchor);
+    const to = visible.findIndex((e) => e.id === id);
+    if (mode === "only" || from < 0 || to < 0) {
+      selectOnly(id);
+      return;
+    }
+    const range = visible.slice(Math.min(from, to), Math.max(from, to) + 1).map((e) => e.id);
+    selection = [...range.filter((x) => x !== id), id];
+  }
+
+  function selectOnly(id: number | null) {
+    selection = id == null ? [] : [id];
+    anchor = id;
+  }
+
   /** 切换到目录 `id`；`dir` 决定列表滑入方向。 */
   function go(id: number, dir: number, record = true) {
     if (id === dirId) return;
@@ -119,7 +172,7 @@
     direction = dir;
     dirId = id;
     hoverId = null;
-    selectedId = null;
+    selectOnly(null);
     hits = null;
   }
 
@@ -131,7 +184,7 @@
     if (info?.parent == null) return;
     const from = dirId;
     go(info.parent, -1);
-    selectedId = from;
+    selectOnly(from);
   }
 
   function goBack() {
@@ -141,7 +194,7 @@
     forward = [...forward, dirId];
     const from = dirId;
     go(prev, -1, false);
-    selectedId = from;
+    selectOnly(from);
   }
 
   function goForward() {
@@ -168,15 +221,15 @@
   function reveal(hit: SearchHit) {
     if (hit.parent == null) return;
     go(hit.parent, 0);
-    selectedId = hit.id;
+    selectOnly(hit.id);
     filter = "";
   }
 
   /** 选中项先给出删除汇总，确认后再删。 */
   async function askDelete() {
-    if (selectedId == null || plan) return;
+    if (selection.length === 0 || plan) return;
     try {
-      plan = await planDelete([selectedId]);
+      plan = await planDelete(selection);
     } catch (e) {
       toast = { message: String(e), detail: [], tone: "warn" };
     }
@@ -200,7 +253,8 @@
       };
       if (done > 0) {
         const gone = new Set(result.deleted);
-        if (selectedId != null && gone.has(selectedId)) selectedId = null;
+        selection = selection.filter((id) => !gone.has(id));
+        if (anchor != null && gone.has(anchor)) anchor = null;
         hoverId = null;
         if (hits) hits = hits.filter((h) => !gone.has(h.id));
         rootInfo = await nodeInfo(summary.rootId);
@@ -220,6 +274,12 @@
     if (event.key === "Delete") {
       event.preventDefault();
       askDelete();
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !hits) {
+      event.preventDefault();
+      selection = visible.map((e) => e.id);
+    } else if (event.key === "Escape" && selection.length > 0) {
+      event.preventDefault();
+      selectOnly(null);
     } else if (event.key === "Backspace" || (event.altKey && event.key === "ArrowUp")) {
       event.preventDefault();
       up();
@@ -237,6 +297,35 @@
 
 <div class="explorer">
   <header class="toolbar">
+    <button
+      type="button"
+      class="tool"
+      onclick={() => (panels.list = !panels.list)}
+      aria-pressed={panels.list}
+      aria-label={panels.list ? "收起列表" : "展开列表"}
+      title={panels.list ? "收起列表" : "展开列表"}
+      ><svg viewBox="0 0 20 16" width="17" height="14" aria-hidden="true"
+        ><rect
+          x="1"
+          y="1.5"
+          width="18"
+          height="13"
+          rx="3"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        ></rect><path d="M7 1.5v13" stroke="currentColor" stroke-width="1.5"
+        ></path>{#if panels.list}<rect
+            x="2.5"
+            y="3"
+            width="3.5"
+            height="10"
+            rx="1.2"
+            fill="currentColor"
+            opacity="0.45"
+          ></rect>{/if}</svg
+      ></button
+    >
     <div class="nav" role="group" aria-label="导航">
       <button type="button" onclick={goBack} disabled={back.length === 0} aria-label="后退（Alt+←）"
         ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
@@ -294,12 +383,16 @@
     </span>
     <button
       type="button"
-      class="tool"
+      class="tool trash"
       onclick={askDelete}
-      disabled={selectedId == null}
-      aria-label="删除选中的项目（Delete）"
-      title="删除选中的项目（Delete）"
-      ><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+      disabled={selection.length === 0}
+      aria-label="删除选中的 {selection.length} 项（Delete）"
+      title="删除选中的项目（Delete）。Ctrl 或 Shift 点按可多选，Ctrl+A 全选"
+      >{#if selection.length > 1}<span class="count">{selection.length}</span>{/if}<svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        aria-hidden="true"
         ><path
           d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-12"
           fill="none"
@@ -340,6 +433,35 @@
         ></rect><circle cx="11" cy="8" r="1" fill="currentColor"></circle></svg
       ></button
     >
+    <button
+      type="button"
+      class="tool side-toggle"
+      onclick={() => (panels.side = !panels.side)}
+      aria-pressed={panels.side}
+      aria-label={panels.side ? "收起存储空间" : "展开存储空间"}
+      title={panels.side ? "收起存储空间" : "展开存储空间"}
+      ><svg viewBox="0 0 20 16" width="17" height="14" aria-hidden="true"
+        ><rect
+          x="1"
+          y="1.5"
+          width="18"
+          height="13"
+          rx="3"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        ></rect><path d="M13 1.5v13" stroke="currentColor" stroke-width="1.5"
+        ></path>{#if panels.side}<rect
+            x="14"
+            y="3"
+            width="3.5"
+            height="10"
+            rx="1.2"
+            fill="currentColor"
+            opacity="0.45"
+          ></rect>{/if}</svg
+      ></button
+    >
   </header>
 
   {#each [summary.fallbackReason ? `未能使用 MFT 直读（${summary.fallbackReason}），本次是普通遍历。以管理员身份运行会更快、更准确。` : "", filterError, error].filter(Boolean) as message (message)}
@@ -347,29 +469,37 @@
   {/each}
 
   <div class="body">
-    <section class="panel list" aria-label="项目列表">
-      {#if hits}
-        <SearchResults query={searchedFor} {hits} onreveal={reveal} onclose={() => (hits = null)} />
-      {:else}
-        {#key dirId}
-          <div
-            class="slide"
-            in:fly={{ x: direction * 28, duration: direction === 0 ? 0 : 240, easing: cubicOut }}
-          >
-            <ChildListView
-              entries={filtered?.entries ?? all.entries}
-              total={filtered?.total ?? all.total}
-              parentSize={info?.size ?? 0}
-              {hoverId}
-              {selectedId}
-              onhover={(id) => (hoverId = id)}
-              onopen={open}
-              onselect={(id) => (selectedId = id)}
-            />
-          </div>
-        {/key}
-      {/if}
-    </section>
+    <div class="fold list-fold" class:collapsed={!panels.list} inert={!panels.list}>
+      <section class="panel list" aria-label="项目列表">
+        {#if hits}
+          <SearchResults
+            query={searchedFor}
+            {hits}
+            onreveal={reveal}
+            onclose={() => (hits = null)}
+          />
+        {:else}
+          {#key dirId}
+            <div
+              class="slide"
+              in:fly={{ x: direction * 28, duration: direction === 0 ? 0 : 240, easing: cubicOut }}
+            >
+              <ChildListView
+                entries={filtered?.entries ?? all.entries}
+                total={filtered?.total ?? all.total}
+                parentSize={info?.size ?? 0}
+                {hoverId}
+                {selected}
+                focusId={selectedId}
+                onhover={(id) => (hoverId = id)}
+                onopen={open}
+                onselect={select}
+              />
+            </div>
+          {/key}
+        {/if}
+      </section>
+    </div>
 
     <section class="panel map" aria-label="矩形树图">
       <div class="map-head">
@@ -380,8 +510,11 @@
               ? ` · ${focus.files.toLocaleString()} 个文件`
               : ""}</span
           >
+        {:else if selection.length > 1}
+          <strong>已选 {selection.length} 项</strong>
+          <span>{formatSize(selectedSize)} · {formatPercent(selectedSize, info?.size ?? 0)}</span>
         {:else}
-          <span>点按文件夹放大查看，Backspace 返回上一级</span>
+          <span>点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选</span>
         {/if}
       </div>
       <Treemap
@@ -389,17 +522,19 @@
         {version}
         {entries}
         {hoverId}
-        {selectedId}
+        {selected}
         {highlight}
         onhover={(id) => (hoverId = id)}
         onopen={open}
-        onselect={(id) => (selectedId = id)}
+        onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
       />
     </section>
 
-    <aside class="side">
-      <TypeStats {stats} />
-    </aside>
+    <div class="fold side-fold" class:collapsed={!panels.side} inert={!panels.side}>
+      <aside class="side">
+        <TypeStats {stats} />
+      </aside>
+    </div>
   </div>
 
   <footer>
@@ -450,6 +585,7 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    overflow: hidden;
   }
 
   .toolbar {
@@ -489,6 +625,31 @@
   .nav button:disabled,
   .tool:disabled {
     opacity: 0.3;
+  }
+
+  .tool[aria-pressed="true"] {
+    color: var(--ink);
+  }
+
+  .trash {
+    position: relative;
+  }
+
+  .count {
+    position: absolute;
+    top: -3px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
   }
 
   .title {
@@ -567,12 +728,54 @@
   }
 
   .body {
+    --list-w: 400px;
+    --side-w: 250px;
     flex: 1;
     min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr) 250px;
-    gap: 12px;
+    display: flex;
     padding: 12px 14px;
+  }
+
+  /* 可收起的侧栏：外层改宽度做动画，内容保持固定宽度，收起过程中不重新排版。 */
+  .fold {
+    flex: none;
+    display: flex;
+    min-height: 0;
+    /* 收起时裁掉内容，但给面板阴影留出余地。 */
+    overflow: clip;
+    overflow-clip-margin: 24px;
+    transition:
+      width 0.32s cubic-bezier(0.32, 0.72, 0, 1),
+      margin 0.32s cubic-bezier(0.32, 0.72, 0, 1),
+      opacity 0.24s;
+  }
+
+  .list-fold {
+    width: var(--list-w);
+    margin-right: 12px;
+    justify-content: flex-end;
+  }
+
+  .side-fold {
+    width: var(--side-w);
+    margin-left: 12px;
+  }
+
+  .fold.collapsed {
+    width: 0;
+    margin: 0;
+    opacity: 0;
+    overflow-clip-margin: 0;
+  }
+
+  .list-fold > .panel {
+    flex: none;
+    width: var(--list-w);
+  }
+
+  .map {
+    flex: 1;
+    min-width: 0;
   }
 
   .panel {
@@ -615,6 +818,8 @@
   }
 
   .side {
+    flex: none;
+    width: var(--side-w);
     min-height: 0;
     overflow-y: auto;
   }
@@ -676,10 +881,11 @@
 
   @media (max-width: 1100px) {
     .body {
-      grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+      --list-w: 340px;
     }
 
-    .side {
+    .side-fold,
+    .side-toggle {
       display: none;
     }
   }

@@ -11,25 +11,18 @@
     /** 当前目录子项，按 id 索引，用来取名称和大小。 */
     entries: Map<number, Entry>;
     hoverId: number | null;
-    selectedId: number | null;
+    /** 选中的项目（可多选）。 */
+    selected: Set<number>;
     /** 筛选时只高亮这些 id，其余变淡；`null` 表示不筛选。 */
     highlight: Set<number> | null;
     onhover: (id: number | null) => void;
     onopen: (id: number) => void;
-    onselect: (id: number) => void;
+    /** `toggle` 为 true 时（Ctrl+点按）加入或移出选择，否则只选这一项。 */
+    onselect: (id: number, toggle: boolean) => void;
   }
 
-  let {
-    dirId,
-    version,
-    entries,
-    hoverId,
-    selectedId,
-    highlight,
-    onhover,
-    onopen,
-    onselect,
-  }: Props = $props();
+  let { dirId, version, entries, hoverId, selected, highlight, onhover, onopen, onselect }: Props =
+    $props();
 
   interface Box {
     x: number;
@@ -149,7 +142,7 @@
 
   // 静态重绘：悬停、选中、筛选、名称或配色变化时。
   $effect(() => {
-    void [rects, width, height, hoverId, selectedId, highlight, entries, repaint];
+    void [rects, width, height, hoverId, selected, highlight, entries, repaint];
     if (!transition) untrack(paint);
   });
 
@@ -219,13 +212,14 @@
     pal: Palette,
     dim: Set<number> | null,
   ) {
-    for (const r of list) {
+    list.forEach((r, i) => {
       const b = map(r);
-      if (b.w < 0.5 || b.h < 0.5) continue;
+      if (b.w < 0.5 || b.h < 0.5) return;
       ctx.globalAlpha = alpha * (dim && !dim.has(r.id) ? 0.22 : 1);
-      ctx.fillStyle = pal.fill[r.category];
+      const shades = pal.fill[r.category];
+      ctx.fillStyle = shades[i % shades.length];
       if (tilePath(ctx, b, b.w > 6 && b.h > 6 ? 1.5 : 0.5)) ctx.fill();
-    }
+    });
     ctx.globalAlpha = 1;
   }
 
@@ -291,13 +285,18 @@
       return;
     }
 
-    drawTiles(ctx, rects, (r) => r, 1, pal, highlight);
+    // 侧栏展开、收起时画布尺寸逐帧变化，新布局要等尺寸稳定后才取；期间先把旧布局拉伸铺满。
+    const sx = layoutSize.w > 0 ? width / layoutSize.w : 1;
+    const sy = layoutSize.h > 0 ? height / layoutSize.h : 1;
+    const fit = (r: Box): Box => ({ x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy });
+    drawTiles(ctx, rects, fit, 1, pal, highlight);
     ctx.textBaseline = "top";
     const family = getComputedStyle(container).fontFamily;
-    for (const r of rects) {
-      const entry = entries.get(r.id);
+    for (const rect of rects) {
+      const r = fit(rect);
+      const entry = entries.get(rect.id);
       if (!entry || r.w < 52 || r.h < 24) continue;
-      if (highlight && !highlight.has(r.id)) continue;
+      if (highlight && !highlight.has(rect.id)) continue;
       ctx.fillStyle = pal.ink;
       ctx.font = `600 12px ${family}`;
       ctx.fillText(ellipsize(ctx, entry.name, r.w - 16), r.x + 8, r.y + 7);
@@ -310,15 +309,14 @@
     }
 
     const hovered = rects.find((r) => r.id === hoverId);
-    if (hovered && tilePath(ctx, hovered, 1.5)) {
+    if (hovered && tilePath(ctx, fit(hovered), 1.5)) {
       ctx.fillStyle = "rgb(255 255 255 / 0.22)";
       ctx.fill();
     }
-    const selected = rects.find((r) => r.id === selectedId);
-    if (selected && tilePath(ctx, selected, 2.5)) {
-      ctx.strokeStyle = pal.accent;
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
+    ctx.strokeStyle = pal.accent;
+    ctx.lineWidth = 2.5;
+    for (const r of rects) {
+      if (selected.has(r.id) && tilePath(ctx, fit(r), 2.5)) ctx.stroke();
     }
   }
 
@@ -338,9 +336,10 @@
   function onclick(event: MouseEvent) {
     const r = hit(event);
     if (!r) return;
+    const toggle = event.ctrlKey || event.metaKey;
     const entry = entries.get(r.id);
-    if (entry?.isDir && entry.hasChildren) onopen(r.id);
-    else onselect(r.id);
+    if (!toggle && entry?.isDir && entry.hasChildren) onopen(r.id);
+    else onselect(r.id, toggle);
   }
 </script>
 

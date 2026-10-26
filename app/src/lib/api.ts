@@ -3,6 +3,9 @@ import { CATEGORY_KEYS, type CategoryKey } from "./categories";
 
 export type ScanMode = "mft" | "walk";
 
+/** 列表里的选择方式：只选这一项、加选或取消（Ctrl）、连续选择（Shift）。 */
+export type SelectMode = "only" | "toggle" | "range";
+
 export interface Volume {
   root: string;
   label: string;
