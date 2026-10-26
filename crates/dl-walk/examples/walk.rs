@@ -9,7 +9,7 @@ fn main() {
         .unwrap_or_else(dl_walk::default_threads);
 
     let started = std::time::Instant::now();
-    let result = dl_walk::walk_with_threads(std::path::Path::new(path), threads, &|_| {})
+    let result = dl_walk::walk_with_threads(std::path::Path::new(path), threads, &|_| true)
         .expect("walk failed");
     let t = &result.tree;
     println!(

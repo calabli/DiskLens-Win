@@ -1,99 +1,100 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
-  import { formatPercent, formatSize } from "$lib/format";
+  import { cancelScan, startScan, type ScanMode, type ScanSummary } from "$lib/api";
+  import Explorer from "$lib/components/Explorer.svelte";
+  import Home from "$lib/components/Home.svelte";
+  import ScanProgress from "$lib/components/ScanProgress.svelte";
 
-  interface Entry {
-    name: string;
-    size: number;
-    allocated: number;
-    files: number;
-    isDir: boolean;
-  }
+  type Phase = "home" | "scanning" | "result";
 
-  interface ScanSummary {
-    root: string;
-    mode: "mft" | "walk";
-    fallbackReason: string | null;
-    totalSize: number;
-    totalAllocated: number;
-    fileCount: number;
-    nodeCount: number;
-    skipped: number;
-    elapsedMs: number;
-    children: Entry[];
-  }
-
-  let path = $state("D:\\");
-  let scanning = $state(false);
-  let error = $state("");
+  let phase = $state<Phase>("home");
+  let scanPath = $state("");
+  let mode = $state<ScanMode | null>(null);
+  let fallbackReason = $state<string | null>(null);
+  let processed = $state(0);
+  let elapsedMs = $state(0);
   let summary = $state<ScanSummary | null>(null);
+  let error = $state("");
+  /** 每次扫描递增；用于让结果页在重新扫描后整个重建。 */
+  let scanSeq = $state(0);
 
-  const largest = $derived(summary?.children[0]?.size ?? 1);
-
-  async function scan(event: SubmitEvent) {
-    event.preventDefault();
-    scanning = true;
+  async function scan(path: string) {
+    scanPath = path;
+    mode = null;
+    fallbackReason = null;
+    processed = 0;
+    elapsedMs = 0;
     error = "";
+    const previous = phase;
+    phase = "scanning";
     try {
-      summary = await invoke<ScanSummary>("scan_folder", { path });
+      summary = await startScan(path, (e) => {
+        if (e.kind === "started") {
+          mode = e.mode;
+          fallbackReason = e.fallbackReason;
+        } else {
+          processed = e.processed;
+          elapsedMs = e.elapsedMs;
+        }
+      });
+      scanSeq++;
+      phase = "result";
     } catch (e) {
-      error = String(e);
-      summary = null;
-    } finally {
-      scanning = false;
+      const message = String(e);
+      if (message !== "已取消") error = message;
+      phase = previous === "result" && summary ? "result" : "home";
     }
+  }
+
+  async function cancel() {
+    await cancelScan();
   }
 </script>
 
-<main>
-  <header>
-    <h1>DiskLens</h1>
-    <form onsubmit={scan}>
-      <label for="path">文件夹</label>
-      <input id="path" bind:value={path} spellcheck="false" autocomplete="off" />
-      <button type="submit" disabled={scanning}>{scanning ? "扫描中…" : "扫描"}</button>
-    </form>
-  </header>
+{#if error}
+  <p class="error" role="alert">
+    {error}
+    <button type="button" onclick={() => (error = "")}>关闭</button>
+  </p>
+{/if}
 
-  {#if error}
-    <p class="error" role="alert">{error}</p>
-  {/if}
-
-  {#if summary}
-    <p class="summary">
-      {[
-        summary.root,
-        summary.mode === "mft" ? "MFT 直读" : "普通遍历",
-        formatSize(summary.totalSize),
-        `占用 ${formatSize(summary.totalAllocated)}`,
-        `${summary.fileCount.toLocaleString()} 个文件`,
-        `用时 ${(summary.elapsedMs / 1000).toFixed(1)} 秒`,
-        summary.skipped > 0 ? `${summary.skipped} 个目录无权读取` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")}
-    </p>
-    {#if summary.fallbackReason}
-      <p class="notice">未能使用 MFT 直读（{summary.fallbackReason}），已改用普通遍历。</p>
-    {/if}
-    <ul>
-      {#each summary.children as child (child.name)}
-        <li>
-          <span class="name" class:dir={child.isDir}>{child.name}</span>
-          <span class="size">{formatSize(child.size)}</span>
-          <span class="bar"><span style:width="{(child.size / largest) * 100}%"></span></span>
-          <span class="pct">{formatPercent(child.size, summary.totalSize)}</span>
-        </li>
-      {/each}
-    </ul>
-  {/if}
-</main>
+{#if phase === "home"}
+  <Home onscan={scan} />
+{:else if phase === "scanning"}
+  <ScanProgress path={scanPath} {mode} {fallbackReason} {processed} {elapsedMs} oncancel={cancel} />
+{:else if summary}
+  {#key scanSeq}
+    <Explorer
+      {summary}
+      onrescan={() => summary && scan(summary.root)}
+      onhome={() => (phase = "home")}
+    />
+  {/key}
+{/if}
 
 <style>
+  :global(:root) {
+    --bg: #f4f3ef;
+    --panel: #ffffff;
+    --ink: #1c1c1a;
+    --ink-2: #5f5e57;
+    --ink-3: #8a877e;
+    --line: #e4e2dc;
+    --line-strong: #d9d6ce;
+    --track: #eceae4;
+    --hover: #f2f1ec;
+    --selected: #eaf0fc;
+    --accent: #2f6feb;
+    --good: #1d5c45;
+    --good-bg: #e3f1ea;
+    --warn: #7a4b0c;
+    --warn-bg: #fbefd9;
+    --danger: #8a2a1f;
+  }
+
   :global(body) {
     margin: 0;
-    background: #f4f3ef;
-    color: #1c1c1a;
+    background: var(--bg);
+    color: var(--ink);
     font:
       13px/1.4 "Segoe UI",
       "Microsoft YaHei UI",
@@ -101,130 +102,34 @@
       sans-serif;
   }
 
-  main {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 16px;
-  }
-
-  header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px 24px;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 18px;
-  }
-
-  form {
-    display: flex;
-    flex: 1;
-    align-items: center;
-    gap: 8px;
-  }
-
-  input {
-    flex: 1;
-    min-width: 0;
-    height: 36px;
-    padding: 0 10px;
-    border: 1px solid #d9d6ce;
-    border-radius: 8px;
-    font: inherit;
-  }
-
-  button {
-    height: 36px;
-    padding: 0 16px;
-    border: 0;
-    border-radius: 8px;
-    background: #2f6feb;
-    color: #fff;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  button:disabled {
-    background: #b8b4aa;
-    cursor: default;
+  :global(html),
+  :global(body) {
+    height: 100%;
   }
 
   .error {
-    color: #8a2a1f;
-  }
-
-  .summary {
-    color: #5f5e57;
-  }
-
-  .notice {
-    padding: 8px 12px;
-    border-radius: 8px;
-    background: #fbefd9;
-    color: #7a4b0c;
-  }
-
-  ul {
-    margin: 0;
-    padding: 4px 0;
-    list-style: none;
-    background: #fff;
-    border: 1px solid #e4e2dc;
-    border-radius: 12px;
-  }
-
-  li {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 80px 120px 56px;
-    gap: 12px;
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    z-index: 10;
+    transform: translateX(-50%);
+    display: flex;
     align-items: center;
-    padding: 6px 14px;
+    gap: 12px;
+    margin: 0;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: #f8e1de;
+    color: var(--danger);
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
   }
 
-  .name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .name::before {
-    content: "";
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    margin-right: 8px;
-    border-radius: 2px;
-    background: #c9c4b8;
-  }
-
-  .name.dir::before {
-    background: #3a6ac8;
-  }
-
-  .size,
-  .pct {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .pct {
-    color: #5f5e57;
-  }
-
-  .bar {
-    height: 6px;
-    border-radius: 3px;
-    background: #eceae4;
-  }
-
-  .bar span {
-    display: block;
-    height: 6px;
-    border-radius: 3px;
-    background: #3a6ac8;
+  .error button {
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: inherit;
+    cursor: pointer;
   }
 </style>

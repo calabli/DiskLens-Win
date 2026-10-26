@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 use std::fs::{self, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::thread;
 
@@ -32,11 +32,15 @@ pub struct WalkResult {
 
 /// 遍历 `root`，返回已汇总大小的文件树。
 pub fn walk(root: &Path) -> io::Result<WalkResult> {
-    walk_with_progress(root, &|_| {})
+    walk_with_progress(root, &|_| true)
 }
 
 /// 同 [`walk`]，并定期以已处理的条目数调用 `progress`（可能从任意工作线程调用）。
-pub fn walk_with_progress(root: &Path, progress: &(dyn Fn(u64) + Sync)) -> io::Result<WalkResult> {
+/// `progress` 返回 `false` 即取消，此时返回 [`io::ErrorKind::Interrupted`]。
+pub fn walk_with_progress(
+    root: &Path,
+    progress: &(dyn Fn(u64) -> bool + Sync),
+) -> io::Result<WalkResult> {
     walk_with_threads(root, default_threads(), progress)
 }
 
@@ -69,7 +73,7 @@ struct Queue {
 pub fn walk_with_threads(
     root: &Path,
     threads: usize,
-    progress: &(dyn Fn(u64) + Sync),
+    progress: &(dyn Fn(u64) -> bool + Sync),
 ) -> io::Result<WalkResult> {
     let meta = fs::symlink_metadata(root)?;
     if !meta.is_dir() {
@@ -88,6 +92,7 @@ pub fn walk_with_threads(
     let next_id = AtomicUsize::new(1);
     let seen = AtomicU64::new(0);
     let skipped = AtomicU64::new(0);
+    let cancelled = AtomicBool::new(false);
 
     let listings: Vec<(usize, Vec<Item>)> = thread::scope(|s| {
         let workers: Vec<_> = (0..threads.max(1))
@@ -95,6 +100,11 @@ pub fn walk_with_threads(
                 s.spawn(|| {
                     let mut out = Vec::new();
                     while let Some((id, path)) = take_job(&queue, &ready) {
+                        // 取消后仍要把排队的目录逐个标记完成，否则等待中的线程永远等不到结束。
+                        if cancelled.load(Ordering::Relaxed) {
+                            finish_job(&queue, &ready, Vec::new());
+                            continue;
+                        }
                         let mut items = Vec::new();
                         let mut subdirs = Vec::new();
                         match fs::read_dir(&path) {
@@ -120,8 +130,11 @@ pub fn walk_with_threads(
                                         });
                                     }
                                     let n = seen.fetch_add(1, Ordering::Relaxed) + 1;
-                                    if n.is_multiple_of(PROGRESS_EVERY) {
-                                        progress(n);
+                                    if n.is_multiple_of(PROGRESS_EVERY) && !progress(n) {
+                                        cancelled.store(true, Ordering::Relaxed);
+                                    }
+                                    if cancelled.load(Ordering::Relaxed) {
+                                        break;
                                     }
                                 }
                             }
@@ -142,6 +155,9 @@ pub fn walk_with_threads(
             .collect()
     });
 
+    if cancelled.into_inner() {
+        return Err(io::Error::new(io::ErrorKind::Interrupted, "扫描已取消"));
+    }
     let tree = assemble(root, next_id.into_inner(), listings);
     progress(seen.into_inner());
     Ok(WalkResult {
@@ -393,8 +409,8 @@ mod tests {
             v.sort();
             v
         };
-        let one = walk_with_threads(&tmp.0, 1, &|_| {}).unwrap();
-        let many = walk_with_threads(&tmp.0, 8, &|_| {}).unwrap();
+        let one = walk_with_threads(&tmp.0, 1, &|_| true).unwrap();
+        let many = walk_with_threads(&tmp.0, 8, &|_| true).unwrap();
         assert_eq!(flatten(&one.tree), flatten(&many.tree));
         assert_eq!(one.tree.file_count(0), 300);
     }
@@ -404,8 +420,26 @@ mod tests {
         let tmp = TempDir::new("progress");
         fs::write(tmp.0.join("x"), b"1").unwrap();
         let last = AtomicU64::new(0);
-        walk_with_progress(&tmp.0, &|n| last.store(n, Ordering::Relaxed)).unwrap();
+        walk_with_progress(&tmp.0, &|n| {
+            last.store(n, Ordering::Relaxed);
+            true
+        })
+        .unwrap();
         assert_eq!(last.into_inner(), 1);
+    }
+
+    #[test]
+    fn progress_can_cancel() {
+        let tmp = TempDir::new("cancel");
+        for d in 0..4 {
+            let dir = tmp.0.join(format!("d{d}"));
+            fs::create_dir_all(&dir).unwrap();
+            for f in 0..PROGRESS_EVERY / 4 + 10 {
+                fs::write(dir.join(format!("{f}")), b"").unwrap();
+            }
+        }
+        let err = walk_with_threads(&tmp.0, 4, &|_| false).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
     }
 
     #[test]

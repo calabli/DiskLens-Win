@@ -24,7 +24,7 @@ fn mft_matches_walk_on_test_volume() {
         .and_then(|s| s.chars().next())
         .expect("set DL_TEST_VOLUME to the test volume's drive letter");
 
-    let mft = dl_ntfs::scan_volume(letter, |_| {}).expect("MFT scan (run as administrator)");
+    let mft = dl_ntfs::scan_volume(letter, |_| true).expect("MFT scan (run as administrator)");
     let walk = dl_walk::walk(Path::new(&format!(r"{letter}:\"))).unwrap();
     let (m, w) = (&mft.tree, &walk.tree);
 

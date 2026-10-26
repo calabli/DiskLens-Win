@@ -32,6 +32,8 @@ pub enum Error {
     NotNtfs,
     Corrupt(&'static str),
     Unsupported(&'static str),
+    /// 进度回调要求停止。
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -44,6 +46,7 @@ impl fmt::Display for Error {
             Self::NotNtfs => f.write_str("不是 NTFS 卷"),
             Self::Corrupt(what) => write!(f, "MFT 数据异常：{what}"),
             Self::Unsupported(what) => write!(f, "暂不支持：{what}"),
+            Self::Cancelled => f.write_str("扫描已取消"),
         }
     }
 }

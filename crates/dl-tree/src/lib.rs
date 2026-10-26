@@ -9,7 +9,11 @@
 //! 约定：父节点必须先于子节点加入（父节点的 id 更小）。[`FileTree::finalize`]
 //! 依赖这一点，只需倒序扫一遍就能把大小和文件数汇总到每个目录。
 
+mod layout;
+
 use std::cmp::Reverse;
+
+pub use layout::{Rect, squarify};
 
 /// 节点在树中的索引。根节点固定为 0。
 pub type NodeId = u32;
