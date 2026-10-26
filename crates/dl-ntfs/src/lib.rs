@@ -11,11 +11,13 @@
 //! - [`record`]：单条文件记录的 fixup 与属性解析
 //! - [`runs`]：非常驻属性的 data runs
 //! - [`scan`]：读取整个 MFT 并组装文件树
+//! - [`usn`]：读取 USN 日志，把扫描之后的变化增量应用到文件树
 
 pub mod boot;
 pub mod record;
 pub mod runs;
 pub mod scan;
+pub mod usn;
 
 use std::fmt;
 use std::io;
@@ -34,6 +36,8 @@ pub enum Error {
     Unsupported(&'static str),
     /// 进度回调要求停止。
     Cancelled,
+    /// USN 日志不可用、已重建或旧记录已被覆盖，需要完整重扫。
+    Journal(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -47,6 +51,7 @@ impl fmt::Display for Error {
             Self::Corrupt(what) => write!(f, "MFT 数据异常：{what}"),
             Self::Unsupported(what) => write!(f, "暂不支持：{what}"),
             Self::Cancelled => f.write_str("扫描已取消"),
+            Self::Journal(why) => write!(f, "无法增量刷新：{why}"),
         }
     }
 }

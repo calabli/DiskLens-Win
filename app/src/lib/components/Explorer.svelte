@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import {
@@ -6,6 +7,7 @@
     listChildren,
     nodeInfo,
     planDelete,
+    refreshScan,
     search,
     typeStats,
     type ChildList,
@@ -16,10 +18,11 @@
     type SelectMode,
     type TypeStat,
   } from "$lib/api";
-  import { formatPercent, formatSize } from "$lib/format";
+  import { formatAgo, formatPercent, formatSize } from "$lib/format";
   import ChildListView from "./ChildList.svelte";
   import ConfirmDelete from "./ConfirmDelete.svelte";
   import SearchResults from "./SearchResults.svelte";
+  import Sunburst from "./Sunburst.svelte";
   import Toast from "./Toast.svelte";
   import Treemap from "./Treemap.svelte";
   import TypeStats from "./TypeStats.svelte";
@@ -35,13 +38,19 @@
   const SEARCH_LIMIT = 500;
   const LAYOUT_KEY = "disklens.panels";
 
-  /** 读取上次的侧栏展开状态；存储不可用时用默认值。 */
-  function loadPanels(): { list: boolean; side: boolean } {
+  type ChartKind = "treemap" | "sunburst";
+
+  /** 读取上次的侧栏展开状态和图表类型；存储不可用时用默认值。 */
+  function loadPanels(): { list: boolean; side: boolean; chart: ChartKind } {
     try {
       const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}");
-      return { list: saved.list !== false, side: saved.side !== false };
+      return {
+        list: saved.list !== false,
+        side: saved.side !== false,
+        chart: saved.chart === "sunburst" ? "sunburst" : "treemap",
+      };
     } catch {
-      return { list: true, side: true };
+      return { list: true, side: true, chart: "treemap" };
     }
   }
 
@@ -74,6 +83,12 @@
   let plan = $state<DeletePlan | null>(null);
   let deleting = $state(false);
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
+  let refreshing = $state(false);
+  /** 最近一次增量刷新的结果，显示在状态栏。 */
+  let refreshNote = $state<string | null>(null);
+  let lastRefresh = 0;
+  /** 窗口重新获得焦点时，距上次刷新至少这么久才再刷新。 */
+  const FOCUS_REFRESH_MS = 5000;
 
   const entries = $derived(new Map(all.entries.map((e) => [e.id, e])));
   const highlight = $derived(filtered ? new Set(filtered.entries.map((e) => e.id)) : null);
@@ -83,7 +98,24 @@
   const selectedSize = $derived(
     selection.reduce((sum, id) => sum + (entries.get(id)?.size ?? 0), 0),
   );
-  const focus = $derived(entries.get(hoverId ?? (selection.length === 1 ? selection[0] : -1)));
+  /** 悬停在旭日图外圈（不是当前目录的直接子项）时，现查这一项的信息。 */
+  let hoverDetail = $state<NodeInfo | null>(null);
+  const focus = $derived.by(() => {
+    const id = hoverId ?? (selection.length === 1 ? selection[0] : -1);
+    return entries.get(id) ?? (hoverDetail?.id === id ? hoverDetail : undefined);
+  });
+
+  let detailSeq = 0;
+  $effect(() => {
+    const id = hoverId;
+    const mine = ++detailSeq;
+    if (id == null || untrack(() => entries.has(id))) return;
+    nodeInfo(id)
+      .then((n) => {
+        if (mine === detailSeq) hoverDetail = n;
+      })
+      .catch(() => {});
+  });
   const title = $derived(info ? (info.parent == null ? summary.root : info.name) : "");
 
   // 进入目录：取节点信息、子项和类型分布。只保留最后一次请求的结果。
@@ -101,7 +133,15 @@
         error = "";
       })
       .catch((e) => {
-        if (mine === loadSeq) error = String(e);
+        if (mine !== loadSeq) return;
+        // 刷新后当前文件夹可能已被删除，回到根目录。
+        if (id !== summary.rootId && String(e).includes("已不存在")) {
+          back = [];
+          forward = [];
+          dirId = summary.rootId;
+        } else {
+          error = String(e);
+        }
       });
   });
 
@@ -268,6 +308,55 @@
     }
   }
 
+  /**
+   * 按 USN 日志增量刷新。`manual` 为 true 时（点按刷新按钮），不能增量刷新就完整重扫；
+   * 自动刷新时只在状态栏说明原因。
+   */
+  async function refresh(manual: boolean) {
+    if (refreshing || plan || deleting) return;
+    if (summary.mode !== "mft") {
+      if (manual) onrescan();
+      return;
+    }
+    refreshing = true;
+    lastRefresh = Date.now();
+    try {
+      const r = await refreshScan();
+      if (r.kind === "needsFullScan") {
+        // 自动刷新做不到时不打扰，状态栏照常显示扫描时间。
+        if (manual) onrescan();
+        return;
+      }
+      const changed = r.added + r.removed + r.updated;
+      refreshNote =
+        changed > 0
+          ? `已刷新，${changed.toLocaleString()} 项有变化（${(r.elapsedMs / 1000).toFixed(1)} 秒）`
+          : "已是最新";
+      if (changed > 0) {
+        selectOnly(null);
+        hoverId = null;
+        hits = null;
+        rootInfo = await nodeInfo(summary.rootId);
+        version++;
+      }
+    } catch (e) {
+      if (manual) toast = { message: String(e), detail: [], tone: "warn" };
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  // 打开上次的结果后立即刷新一次。只在挂载时运行，不跟踪任何状态。
+  $effect(() => {
+    untrack(() => {
+      if (summary.fromCache) refresh(false);
+    });
+  });
+
+  function onfocus() {
+    if (Date.now() - lastRefresh > FOCUS_REFRESH_MS) refresh(false);
+  }
+
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
     if (target.tagName === "INPUT" || plan) return;
@@ -293,7 +382,7 @@
   }
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} {onfocus} />
 
 <div class="explorer">
   <header class="toolbar">
@@ -403,7 +492,13 @@
         ></path></svg
       ></button
     >
-    <button type="button" class="tool" onclick={onrescan} aria-label="重新扫描" title="重新扫描"
+    <button
+      type="button"
+      class="tool"
+      class:spinning={refreshing}
+      onclick={(e) => (e.shiftKey ? onrescan() : refresh(true))}
+      aria-label="刷新"
+      title="刷新：只读取上次扫描之后的变化。按住 Shift 点按则完整重新扫描"
       ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
         ><path
           d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M12 1.5v3h-3"
@@ -501,7 +596,7 @@
       </section>
     </div>
 
-    <section class="panel map" aria-label="矩形树图">
+    <section class="panel map" aria-label={panels.chart === "sunburst" ? "旭日图" : "矩形树图"}>
       <div class="map-head">
         {#if focus}
           <strong>{focus.name}</strong>
@@ -514,20 +609,79 @@
           <strong>已选 {selection.length} 项</strong>
           <span>{formatSize(selectedSize)} · {formatPercent(selectedSize, info?.size ?? 0)}</span>
         {:else}
-          <span>点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选</span>
+          <span
+            >{panels.chart === "sunburst"
+              ? "点按一圈放大查看，点按圆心返回上一级；Ctrl 点按可多选"
+              : "点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选"}</span
+          >
         {/if}
+        <div class="chart-switch" role="radiogroup" aria-label="图表类型">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={panels.chart === "treemap"}
+            title="矩形树图"
+            onclick={() => (panels.chart = "treemap")}
+            ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+              ><rect
+                x="1.5"
+                y="1.5"
+                width="13"
+                height="13"
+                rx="2.5"
+                fill="none"
+                stroke="currentColor"
+              ></rect><path d="M8 1.5v13M8 8.5h6.5M11 8.5v6" stroke="currentColor"></path></svg
+            ></button
+          >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={panels.chart === "sunburst"}
+            title="旭日图"
+            onclick={() => (panels.chart = "sunburst")}
+            ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+              ><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor"></circle><circle
+                cx="8"
+                cy="8"
+                r="2.6"
+                fill="none"
+                stroke="currentColor"
+              ></circle><path
+                d="M8 1.5v3.9M13.6 11.2 10.2 9.3M2.4 11.2l3.4-1.9"
+                stroke="currentColor"
+              ></path></svg
+            ></button
+          >
+        </div>
       </div>
-      <Treemap
-        {dirId}
-        {version}
-        {entries}
-        {hoverId}
-        {selected}
-        {highlight}
-        onhover={(id) => (hoverId = id)}
-        onopen={open}
-        onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
-      />
+      {#if panels.chart === "sunburst"}
+        <Sunburst
+          {dirId}
+          {version}
+          {title}
+          size={info?.size ?? 0}
+          {hoverId}
+          {selected}
+          {highlight}
+          onhover={(id) => (hoverId = id)}
+          onopen={open}
+          onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+          onup={up}
+        />
+      {:else}
+        <Treemap
+          {dirId}
+          {version}
+          {entries}
+          {hoverId}
+          {selected}
+          {highlight}
+          onhover={(id) => (hoverId = id)}
+          onopen={open}
+          onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+        />
+      {/if}
     </section>
 
     <div class="fold side-fold" class:collapsed={!panels.side} inert={!panels.side}>
@@ -557,7 +711,12 @@
         rootInfo?.size ?? summary.totalSize,
       )}，占用 {formatSize(rootInfo?.allocated ?? summary.totalAllocated)}，扫描用时 {(
         summary.elapsedMs / 1000
-      ).toFixed(1)} 秒{summary.skipped > 0 ? `，${summary.skipped} 个文件夹无权读取` : ""}
+      ).toFixed(1)} 秒{summary.skipped > 0
+        ? `，${summary.skipped} 个文件夹无权读取`
+        : ""}，{refreshNote ??
+        (summary.fromCache
+          ? `这是${formatAgo(summary.scannedAt)}的扫描结果`
+          : `扫描于${formatAgo(summary.scannedAt)}`)}
     </div>
   </footer>
 </div>
@@ -625,6 +784,16 @@
   .nav button:disabled,
   .tool:disabled {
     opacity: 0.3;
+  }
+
+  .spinning svg {
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .tool[aria-pressed="true"] {
@@ -807,13 +976,41 @@
     overflow: hidden;
   }
 
+  .chart-switch {
+    display: flex;
+    flex: none;
+    gap: 2px;
+    margin-left: auto;
+    padding: 2px;
+    border-radius: 7px;
+    background: var(--field);
+  }
+
+  .chart-switch button {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 20px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-2);
+  }
+
+  .chart-switch button[aria-checked="true"] {
+    background: var(--panel);
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+  }
+
   .map-head strong {
     color: var(--ink);
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .map :global(.treemap) {
+  .map :global(.treemap),
+  .map :global(.sunburst) {
     margin: 0 10px 10px;
   }
 

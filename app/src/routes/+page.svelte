@@ -1,17 +1,29 @@
 <script lang="ts">
-  import { cancelScan, startScan, type ScanMode, type ScanSummary } from "$lib/api";
+  import {
+    cachedScans,
+    cancelScan,
+    openCached,
+    startScan,
+    type CachedScan,
+    type LiveEntry,
+    type ScanMode,
+    type ScanSummary,
+  } from "$lib/api";
   import Explorer from "$lib/components/Explorer.svelte";
   import Home from "$lib/components/Home.svelte";
   import ScanProgress from "$lib/components/ScanProgress.svelte";
 
-  type Phase = "home" | "scanning" | "result";
+  type Phase = "starting" | "home" | "scanning" | "result";
 
-  let phase = $state<Phase>("home");
+  let phase = $state<Phase>("starting");
+  let cached = $state<CachedScan[]>([]);
   let scanPath = $state("");
   let mode = $state<ScanMode | null>(null);
   let fallbackReason = $state<string | null>(null);
   let processed = $state(0);
   let elapsedMs = $state(0);
+  let live = $state<LiveEntry[]>([]);
+  let liveTotal = $state(0);
   let summary = $state<ScanSummary | null>(null);
   let error = $state("");
   /** 每次扫描递增；用于让结果页在重新扫描后整个重建。 */
@@ -23,6 +35,8 @@
     fallbackReason = null;
     processed = 0;
     elapsedMs = 0;
+    live = [];
+    liveTotal = 0;
     error = "";
     const previous = phase;
     phase = "scanning";
@@ -31,6 +45,9 @@
         if (e.kind === "started") {
           mode = e.mode;
           fallbackReason = e.fallbackReason;
+        } else if (e.kind === "live") {
+          live = e.items;
+          liveTotal = e.totalSize;
         } else {
           processed = e.processed;
           elapsedMs = e.elapsedMs;
@@ -48,6 +65,36 @@
   async function cancel() {
     await cancelScan();
   }
+
+  /** 打开某个路径上次的扫描结果。 */
+  async function open(root: string) {
+    try {
+      summary = await openCached(root);
+      scanSeq++;
+      phase = "result";
+    } catch (e) {
+      error = String(e);
+      phase = "home";
+    }
+  }
+
+  function home() {
+    phase = "home";
+    cachedScans()
+      .then((c) => (cached = c))
+      .catch(() => {});
+  }
+
+  // 启动时直接显示最近一次的扫描结果；没有缓存时停在首页。
+  $effect(() => {
+    cachedScans()
+      .then((c) => {
+        cached = c;
+        if (c.length > 0) open(c[0].root);
+        else phase = "home";
+      })
+      .catch(() => (phase = "home"));
+  });
 </script>
 
 {#if error}
@@ -58,16 +105,21 @@
 {/if}
 
 {#if phase === "home"}
-  <Home onscan={scan} />
+  <Home {cached} onscan={scan} onopen={open} />
 {:else if phase === "scanning"}
-  <ScanProgress path={scanPath} {mode} {fallbackReason} {processed} {elapsedMs} oncancel={cancel} />
+  <ScanProgress
+    path={scanPath}
+    {mode}
+    {fallbackReason}
+    {processed}
+    {elapsedMs}
+    {live}
+    {liveTotal}
+    oncancel={cancel}
+  />
 {:else if summary}
   {#key scanSeq}
-    <Explorer
-      {summary}
-      onrescan={() => summary && scan(summary.root)}
-      onhome={() => (phase = "home")}
-    />
+    <Explorer {summary} onrescan={() => summary && scan(summary.root)} onhome={home} />
   {/key}
 {/if}
 

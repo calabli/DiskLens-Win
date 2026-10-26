@@ -1,12 +1,15 @@
 <script lang="ts">
-  import { listVolumes, type Volume } from "$lib/api";
-  import { formatPercent, formatSize } from "$lib/format";
+  import { listVolumes, type CachedScan, type Volume } from "$lib/api";
+  import { formatAgo, formatPercent, formatSize } from "$lib/format";
 
   interface Props {
+    /** 缓存的扫描结果，最近的在前。 */
+    cached: CachedScan[];
     onscan: (path: string) => void;
+    onopen: (root: string) => void;
   }
 
-  let { onscan }: Props = $props();
+  let { cached, onscan, onopen }: Props = $props();
 
   let volumes = $state<Volume[]>([]);
   let error = $state("");
@@ -59,6 +62,41 @@
       </li>
     {/each}
   </ul>
+
+  {#if cached.length > 0}
+    <h2>最近的结果</h2>
+    <ul class="volumes recent">
+      {#each cached as c (c.root)}
+        <li>
+          <button
+            type="button"
+            class="volume"
+            onclick={() => onopen(c.root)}
+            title="打开上次的扫描结果，不重新扫描"
+          >
+            <svg class="clock" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"
+              ><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.5"
+              ></circle><path
+                d="M10 6v4.2l2.8 1.8"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              ></path></svg
+            >
+            <span class="meta">
+              <span class="name">{c.root}</span>
+              <span class="usage"
+                >{formatAgo(c.scannedAt)} · {formatSize(c.totalSize)} · {c.fileCount.toLocaleString()}
+                个文件</span
+              >
+            </span>
+            <span class="open">打开</span>
+          </button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 
   <form class="folder" onsubmit={scanFolder}>
     <label for="folder">扫描某个文件夹</label>
@@ -171,6 +209,25 @@
   .fs {
     color: var(--ink-3);
     font-size: 11px;
+  }
+
+  h2 {
+    margin: 0 0 8px 4px;
+    color: var(--ink-2);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .clock {
+    flex: none;
+    margin: 0 7px;
+    color: var(--ink-2);
+  }
+
+  .open {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
   }
 
   .folder label {

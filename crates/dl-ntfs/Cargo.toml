@@ -9,6 +9,15 @@ license.workspace = true
 [dependencies]
 dl-tree.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+] }
+
 [dev-dependencies]
 dl-walk.workspace = true
 

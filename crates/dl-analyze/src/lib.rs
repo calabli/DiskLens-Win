@@ -9,4 +9,4 @@ pub mod stats;
 
 pub use category::Category;
 pub use query::{ParseError, Query};
-pub use stats::{CategoryTotals, ChildBreakdown, breakdown, search};
+pub use stats::{CategoryTotals, ChildBreakdown, breakdown, dominant_dirs, search};

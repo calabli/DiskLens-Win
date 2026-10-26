@@ -14,9 +14,18 @@ export interface Volume {
   free: number;
 }
 
+/** 边扫边看：一个顶层项目目前累计的大小。 */
+export interface LiveEntry {
+  name: string;
+  isDir: boolean;
+  size: number;
+  files: number;
+}
+
 export type ScanEvent =
   | { kind: "started"; mode: ScanMode; fallbackReason: string | null }
-  | { kind: "progress"; processed: number; elapsedMs: number };
+  | { kind: "progress"; processed: number; elapsedMs: number }
+  | { kind: "live"; items: LiveEntry[]; totalSize: number };
 
 export interface ScanSummary {
   root: string;
@@ -29,6 +38,18 @@ export interface ScanSummary {
   nodeCount: number;
   skipped: number;
   elapsedMs: number;
+  /** 扫描完成的时间（Unix 毫秒）。 */
+  scannedAt: number;
+  /** 是否是从缓存读回的上次结果。 */
+  fromCache: boolean;
+}
+
+export interface CachedScan {
+  root: string;
+  mode: ScanMode;
+  scannedAt: number;
+  totalSize: number;
+  fileCount: number;
 }
 
 export interface Crumb {
@@ -132,6 +153,19 @@ export function startScan(path: string, onEvent: (e: ScanEvent) => void) {
 
 export const cancelScan = () => invoke<void>("cancel_scan");
 
+export type RefreshResult =
+  | { kind: "updated"; added: number; removed: number; updated: number; elapsedMs: number }
+  | { kind: "needsFullScan"; reason: string };
+
+/** 按 USN 日志增量刷新当前结果。不能增量刷新时返回原因，由调用方决定是否完整重扫。 */
+export const refreshScan = () => invoke<RefreshResult>("refresh_scan");
+
+/** 缓存的扫描结果，最近的在前。 */
+export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
+
+/** 打开某个路径上次的扫描结果。 */
+export const openCached = (root: string) => invoke<ScanSummary>("open_cached", { root });
+
 export const nodeInfo = (id: number) => invoke<NodeInfo>("node_info", { id });
 
 export const listChildren = (id: number, filter: string | null) =>
@@ -141,6 +175,41 @@ export const typeStats = (id: number) => invoke<TypeStat[]>("type_stats", { id }
 
 export const search = (id: number, query: string, limit: number) =>
   invoke<SearchHit[]>("search", { id, query, limit });
+
+export interface SunburstSegment {
+  id: number;
+  category: CategoryKey;
+  isDir: boolean;
+  /** 第几圈，从 1 开始。 */
+  depth: number;
+  /** 起止角度，圆周的比例（0..1，从 12 点方向顺时针）。 */
+  start: number;
+  end: number;
+}
+
+/**
+ * 每段 20 字节：id u32、标志 u32（低 8 位类型下标，第 8 位表示目录）、圈 u32、起止角度 f32，小端。
+ * 见 Rust 侧 `commands::sunburst`。
+ */
+const SEGMENT_BYTES = 20;
+
+export async function sunburst(id: number): Promise<SunburstSegment[]> {
+  const buf = await invoke<ArrayBuffer>("sunburst", { id });
+  const view = new DataView(buf);
+  const segments: SunburstSegment[] = [];
+  for (let off = 0; off + SEGMENT_BYTES <= buf.byteLength; off += SEGMENT_BYTES) {
+    const flags = view.getUint32(off + 4, true);
+    segments.push({
+      id: view.getUint32(off, true),
+      category: CATEGORY_KEYS[flags & 0xff] ?? "other",
+      isDir: (flags & 0x100) !== 0,
+      depth: view.getUint32(off + 8, true),
+      start: view.getFloat32(off + 12, true),
+      end: view.getFloat32(off + 16, true),
+    });
+  }
+  return segments;
+}
 
 /** 每块 24 字节：id u32、类型下标 u32、x/y/w/h f32，小端。见 Rust 侧 `commands::treemap`。 */
 const RECT_BYTES = 24;

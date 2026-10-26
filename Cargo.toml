@@ -12,6 +12,7 @@ license = "MIT"
 dl-analyze = { path = "crates/dl-analyze" }
 dl-clean = { path = "crates/dl-clean" }
 dl-ntfs = { path = "crates/dl-ntfs" }
+dl-snapshot = { path = "crates/dl-snapshot" }
 dl-tree = { path = "crates/dl-tree" }
 dl-walk = { path = "crates/dl-walk" }
 serde = { version = "1", features = ["derive"] }

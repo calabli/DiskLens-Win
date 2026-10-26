@@ -1,7 +1,7 @@
 //! 子树统计与搜索。
 
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 
 use dl_tree::{FileTree, NodeId, NodeKind};
 
@@ -61,6 +61,62 @@ pub fn breakdown(tree: &FileTree, id: NodeId) -> ChildBreakdown {
         out.children.push((child, totals));
     }
     out
+}
+
+/// `id` 往下 `max_depth` 层以内每个目录的主要类型（给旭日图着色用）。整棵子树只走一遍：
+/// 第 `max_depth` 层的目录直接统计整棵子树，更浅的目录由子项的统计相加得到。
+pub fn dominant_dirs(tree: &FileTree, id: NodeId, max_depth: u32) -> HashMap<NodeId, Category> {
+    let mut out = HashMap::new();
+    if max_depth == 0 {
+        return out;
+    }
+    let in_dev = ancestors_in_dev_dir(tree, id);
+    for child in tree.children(id) {
+        if tree.kind(child) == NodeKind::Dir {
+            collect_dominant(tree, child, 1, max_depth, in_dev, &mut out);
+        }
+    }
+    out
+}
+
+fn collect_dominant(
+    tree: &FileTree,
+    dir: NodeId,
+    depth: u32,
+    max_depth: u32,
+    parent_in_dev: bool,
+    out: &mut HashMap<NodeId, Category>,
+) -> CategoryTotals {
+    let totals = if depth >= max_depth {
+        subtree(tree, dir, parent_in_dev)
+    } else {
+        let in_dev = parent_in_dev || is_dev_dir(tree.name(dir));
+        let mut totals = CategoryTotals::default();
+        for c in tree.children(dir) {
+            match tree.kind(c) {
+                NodeKind::File => {
+                    totals.add_file(
+                        classify(tree.name(c), in_dev),
+                        tree.size(c),
+                        tree.allocated(c),
+                    );
+                }
+                NodeKind::Dir => {
+                    totals.merge(&collect_dominant(
+                        tree,
+                        c,
+                        depth + 1,
+                        max_depth,
+                        in_dev,
+                        out,
+                    ));
+                }
+            }
+        }
+        totals
+    };
+    out.insert(dir, totals.dominant());
+    totals
 }
 
 /// `id` 自己或它的某个祖先是否是开发缓存目录。根目录名（盘符或路径）不算。
@@ -141,6 +197,25 @@ mod tests {
         t.add_file(0, "Win11.iso", 7_000, 8_192);
         t.finalize();
         t
+    }
+
+    #[test]
+    fn dominant_dirs_matches_breakdown_at_every_depth() {
+        let t = sample();
+        let proj = t.child_by_name(0, "proj").unwrap();
+        let nm = t.child_by_name(proj, "node_modules").unwrap();
+        let media = t.child_by_name(0, "media").unwrap();
+
+        for depth in 1..=3 {
+            let d = dominant_dirs(&t, 0, depth);
+            assert_eq!(d[&media], Category::Media, "depth {depth}");
+            assert_eq!(d[&proj], Category::Dev, "depth {depth}");
+            assert_eq!(d.contains_key(&nm), depth >= 2, "depth {depth}");
+        }
+        assert_eq!(dominant_dirs(&t, 0, 2)[&nm], Category::Dev);
+        assert!(dominant_dirs(&t, 0, 0).is_empty());
+        // 从开发缓存目录内部开始，同样算开发缓存。
+        assert_eq!(dominant_dirs(&t, proj, 1)[&nm], Category::Dev);
     }
 
     #[test]
