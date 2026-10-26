@@ -8,14 +8,14 @@ use std::time::Instant;
 
 use dl_analyze::ChildBreakdown;
 use dl_tree::{FileTree, NodeId};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri::ipc::Channel;
 
 /// 两次进度推送之间至少间隔这么多毫秒，避免把前端淹没。
 const PROGRESS_INTERVAL_MS: u64 = 100;
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ScanMode {
     /// 直读 NTFS MFT。
@@ -54,6 +54,10 @@ pub struct ScanSummary {
     pub node_count: usize,
     pub skipped: u64,
     pub elapsed_ms: u64,
+    /// 扫描完成的时间（Unix 毫秒）。
+    pub scanned_at: u64,
+    /// 是否是从缓存读回的上次结果。
+    pub from_cache: bool,
 }
 
 /// 一次完成的扫描。删除文件后树会被修改，所以放在读写锁里。
@@ -66,6 +70,21 @@ pub struct Scanned {
 }
 
 impl Scanned {
+    /// 用扫描或缓存得到的树建立结果。`summary` 里的总大小、文件数和节点数以树为准。
+    pub fn new(tree: FileTree, mut summary: ScanSummary) -> Self {
+        let top = tree.root();
+        summary.root_id = top;
+        summary.total_size = tree.size(top);
+        summary.total_allocated = tree.allocated(top);
+        summary.file_count = tree.file_count(top);
+        summary.node_count = tree.len();
+        Self {
+            tree: RwLock::new(tree),
+            summary,
+            breakdowns: Mutex::new(HashMap::new()),
+        }
+    }
+
     pub fn read(&self) -> RwLockReadGuard<'_, FileTree> {
         self.tree.read().expect("tree poisoned")
     }
@@ -137,7 +156,9 @@ pub async fn start_scan(
         return Err("已取消".into());
     }
     let summary = scanned.summary.clone();
-    *state.scan.lock().expect("state poisoned") = Some(Arc::new(scanned));
+    let scanned = Arc::new(scanned);
+    *state.scan.lock().expect("state poisoned") = Some(Arc::clone(&scanned));
+    crate::cache::save_in_background(scanned);
     Ok(summary)
 }
 
@@ -218,24 +239,21 @@ fn finish(
     skipped: u64,
     started: Instant,
 ) -> Scanned {
-    let top = tree.root();
     let summary = ScanSummary {
         root,
-        root_id: top,
+        root_id: 0,
         mode,
         fallback_reason,
-        total_size: tree.size(top),
-        total_allocated: tree.allocated(top),
-        file_count: tree.file_count(top),
-        node_count: tree.len(),
+        total_size: 0,
+        total_allocated: 0,
+        file_count: 0,
+        node_count: 0,
         skipped,
         elapsed_ms: started.elapsed().as_millis() as u64,
+        scanned_at: crate::cache::now_ms(),
+        from_cache: false,
     };
-    Scanned {
-        tree: RwLock::new(tree),
-        summary,
-        breakdowns: Mutex::new(HashMap::new()),
-    }
+    Scanned::new(tree, summary)
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+mod cache;
 mod cleanup;
 mod commands;
 mod scan;
@@ -11,6 +12,8 @@ pub fn run() {
             volumes::list_volumes,
             scan::start_scan,
             scan::cancel_scan,
+            cache::cached_scans,
+            cache::open_cached,
             commands::node_info,
             commands::list_children,
             commands::treemap,

@@ -16,7 +16,7 @@
     type SelectMode,
     type TypeStat,
   } from "$lib/api";
-  import { formatPercent, formatSize } from "$lib/format";
+  import { formatAgo, formatPercent, formatSize } from "$lib/format";
   import ChildListView from "./ChildList.svelte";
   import ConfirmDelete from "./ConfirmDelete.svelte";
   import SearchResults from "./SearchResults.svelte";
@@ -557,7 +557,11 @@
         rootInfo?.size ?? summary.totalSize,
       )}，占用 {formatSize(rootInfo?.allocated ?? summary.totalAllocated)}，扫描用时 {(
         summary.elapsedMs / 1000
-      ).toFixed(1)} 秒{summary.skipped > 0 ? `，${summary.skipped} 个文件夹无权读取` : ""}
+      ).toFixed(1)} 秒{summary.skipped > 0
+        ? `，${summary.skipped} 个文件夹无权读取`
+        : ""}，{summary.fromCache
+        ? `这是${formatAgo(summary.scannedAt)}的扫描结果`
+        : `扫描于${formatAgo(summary.scannedAt)}`}
     </div>
   </footer>
 </div>

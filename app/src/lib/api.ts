@@ -29,6 +29,18 @@ export interface ScanSummary {
   nodeCount: number;
   skipped: number;
   elapsedMs: number;
+  /** 扫描完成的时间（Unix 毫秒）。 */
+  scannedAt: number;
+  /** 是否是从缓存读回的上次结果。 */
+  fromCache: boolean;
+}
+
+export interface CachedScan {
+  root: string;
+  mode: ScanMode;
+  scannedAt: number;
+  totalSize: number;
+  fileCount: number;
 }
 
 export interface Crumb {
@@ -131,6 +143,12 @@ export function startScan(path: string, onEvent: (e: ScanEvent) => void) {
 }
 
 export const cancelScan = () => invoke<void>("cancel_scan");
+
+/** 缓存的扫描结果，最近的在前。 */
+export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
+
+/** 打开某个路径上次的扫描结果。 */
+export const openCached = (root: string) => invoke<ScanSummary>("open_cached", { root });
 
 export const nodeInfo = (id: number) => invoke<NodeInfo>("node_info", { id });
 
