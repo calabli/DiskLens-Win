@@ -4,11 +4,13 @@
 //! - [`stats`]：子树的类型统计、每个子项的主要类型、按条件搜索最大的若干项
 //! - [`dupes`]：重复文件（按大小、部分哈希、全文哈希三步判定）
 //! - [`findings`]：空文件夹、空文件、失效的链接和快捷方式
+//! - [`similar`]：相似图片（感知哈希）
 
 pub mod category;
 pub mod dupes;
 pub mod findings;
 pub mod query;
+pub mod similar;
 pub mod stats;
 
 pub use category::Category;

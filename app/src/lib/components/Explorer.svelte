@@ -25,6 +25,7 @@
   import ConfirmDelete from "./ConfirmDelete.svelte";
   import Duplicates from "./Duplicates.svelte";
   import Findings from "./Findings.svelte";
+  import Similar from "./Similar.svelte";
   import SearchResults from "./SearchResults.svelte";
   import Sunburst from "./Sunburst.svelte";
   import Toast from "./Toast.svelte";
@@ -90,7 +91,7 @@
   let refreshing = $state(false);
   /** 正在用整理工具（占据主区域）。 */
   let dupOpen = $state(false);
-  let toolTab = $state<"dupes" | "findings">("dupes");
+  let toolTab = $state<"dupes" | "similar" | "findings">("dupes");
   /** 本次打开后删除过的项目，用来从重复文件结果里去掉。 */
   let removed = $state(new Set<number>());
   /** 最近一次增量刷新的结果，显示在状态栏。 */
@@ -530,7 +531,7 @@
       onclick={() => (dupOpen = !dupOpen)}
       aria-pressed={dupOpen}
       aria-label="整理工具"
-      title="整理工具：在当前文件夹中查找重复文件、空文件夹和失效链接"
+      title="整理工具：在当前文件夹中查找重复文件、相似图片、空文件夹和失效链接"
       ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
         ><rect
           x="2"
@@ -656,6 +657,12 @@
           <button
             type="button"
             role="tab"
+            aria-selected={toolTab === "similar"}
+            onclick={() => (toolTab = "similar")}>相似图片</button
+          >
+          <button
+            type="button"
+            role="tab"
             aria-selected={toolTab === "findings"}
             onclick={() => (toolTab = "findings")}>空文件夹与失效链接</button
           >
@@ -668,6 +675,16 @@
             {removed}
             ondelete={(ids) => askDelete(ids)}
             onlink={linkDuplicates}
+            onreveal={revealNode}
+            onclose={() => (dupOpen = false)}
+          />
+        </div>
+        <div class="tool-page" hidden={toolTab !== "similar"}>
+          <Similar
+            rootId={dirId}
+            rootName={title}
+            {removed}
+            ondelete={(ids) => askDelete(ids)}
             onreveal={revealNode}
             onclose={() => (dupOpen = false)}
           />

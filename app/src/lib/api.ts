@@ -244,6 +244,47 @@ export function findIssues(id: number, onProgress: (done: number, total: number)
 
 export const cancelIssues = () => invoke<void>("cancel_issues");
 
+export interface SimilarImage {
+  id: number;
+  path: string;
+  size: number;
+  modifiedMs: number;
+  width: number;
+  height: number;
+  /** 与组里第一张（画质最好的）相差的位数。 */
+  distance: number;
+}
+
+export interface SimilarResult {
+  groups: { files: SimilarImage[] }[];
+  moreGroups: number;
+  wasted: number;
+  images: number;
+  skipped: number;
+  decoded: number;
+  elapsedMs: number;
+}
+
+/** 在目录 `id` 下查找相似图片。被取消时以“已取消”拒绝。 */
+export function findSimilar(
+  id: number,
+  minSize: number,
+  maxDistance: number,
+  onProgress: (done: number, total: number) => void,
+) {
+  const channel = new Channel<{ done: number; total: number }>();
+  channel.onmessage = (p) => onProgress(p.done, p.total);
+  return invoke<SimilarResult>("find_similar", { id, minSize, maxDistance, onEvent: channel });
+}
+
+export const cancelSimilar = () => invoke<void>("cancel_similar");
+
+/** 图片缩略图的 blob URL，用完后应调用 `URL.revokeObjectURL`。 */
+export async function thumbnailUrl(id: number, max: number): Promise<string> {
+  const buf = await invoke<ArrayBuffer>("thumbnail", { id, max });
+  return URL.createObjectURL(new Blob([buf], { type: "image/png" }));
+}
+
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
 
