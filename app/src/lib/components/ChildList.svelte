@@ -48,6 +48,8 @@
     oncontext: (id: number, event: MouseEvent) => void;
     /** 在文件管理器中打开（鼠标中键或行尾的按钮）。 */
     onexplore: (id: number) => void;
+    /** 开始拖动一项（拖到收集篮）。 */
+    ondragitem: (id: number, event: DragEvent) => void;
   }
 
   let {
@@ -68,6 +70,7 @@
     onvisible,
     oncontext,
     onexplore,
+    ondragitem,
   }: Props = $props();
 
   let picking = $state(false);
@@ -188,6 +191,8 @@
           style:grid-template-columns={template}
           aria-label="{entry.isDir ? '文件夹' : '文件'} {entry.name}，{formatSize(entry.size)}"
           aria-pressed={selected.has(entry.id)}
+          draggable="true"
+          ondragstart={(event) => ondragitem(entry.id, event)}
           onmouseenter={() => onhover(entry.id)}
           onclick={(event) => activate(entry, event)}
           onmousedown={(event) => {

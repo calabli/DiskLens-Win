@@ -444,6 +444,25 @@ pub fn bucket_stats(id: NodeId, state: State<'_, AppState>) -> Result<BucketStat
 }
 
 /// 在目录的整棵子树里搜索，返回最大的 `limit` 项。
+/// 图表上标出搜索结果：`ids` 是画出来的方块，返回每一项的标记，见 [`dl_analyze::search_marks`]。
+#[tauri::command]
+pub fn search_marks(
+    id: NodeId,
+    query: String,
+    ids: Vec<NodeId>,
+    state: State<'_, AppState>,
+) -> Result<Vec<u8>, String> {
+    let scan = state.current()?;
+    let guard = scan.read();
+    let t = &*guard;
+    check(t, id)?;
+    let query = Query::parse(&query).map_err(|e| e.to_string())?;
+    if query.is_empty() {
+        return Ok(vec![0; ids.len()]);
+    }
+    Ok(dl_analyze::search_marks(t, id, &query, &ids))
+}
+
 #[tauri::command]
 pub fn search(
     id: NodeId,

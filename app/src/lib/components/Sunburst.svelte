@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { sunburst, type SunburstSegment } from "$lib/api";
+  import { searchMarks, sunburst, type SunburstSegment } from "$lib/api";
   import { resolvePalette, type Palette } from "$lib/categories";
   import { formatSize } from "$lib/format";
 
@@ -16,8 +16,10 @@
     hoverId: number | null;
     /** 选中的项目（可多选）。 */
     selected: Set<number>;
-    /** 筛选时只高亮这些直接子项（连同它们外圈的后代），其余变淡；`null` 表示不筛选。 */
+    /** 筛选时只高亮这些直接子项（连同它们外圈的后代），其余变灰；`null` 表示不筛选。 */
     highlight: Set<number> | null;
+    /** 正在所有子文件夹中搜索的条件：命中的段和含有命中项的段保持原色，其余变灰。 */
+    query: string | null;
     onhover: (id: number | null) => void;
     onopen: (id: number) => void;
     /** `toggle` 为 true 时（Ctrl+点按）加入或移出选择，否则只选这一项。 */
@@ -27,6 +29,8 @@
     oncontext: (id: number, event: MouseEvent) => void;
     /** 鼠标中键：在文件管理器中打开。 */
     onexplore: (id: number) => void;
+    /** 开始拖动一项（拖到收集篮）。 */
+    ondragitem: (id: number, event: DragEvent) => void;
   }
 
   let {
@@ -38,12 +42,14 @@
     hoverId,
     selected,
     highlight,
+    query,
     onhover,
     onopen,
     onselect,
     onup,
     oncontext,
     onexplore,
+    ondragitem,
   }: Props = $props();
   /** 圆心空洞占半径的比例。 */
   const HOLE = 0.26;
@@ -94,13 +100,44 @@
     return { cx: width / 2, cy: height / 2, radius, hole, ring: (radius - hole) / rings };
   });
 
-  /** 每段所属的第 1 圈祖先（按角度包含关系找），筛选时整支变淡。 */
-  const topOf = $derived.by(() => {
-    const tops = segments.filter((s) => s.depth === 1);
+  /** 搜索结果在当前布局上的标记，见 searchMarks。 */
+  let marks = $state<Map<number, number> | null>(null);
+  let marksSeq = 0;
+  $effect(() => {
+    const q = query;
+    const list = segments;
+    const id = loadedDir;
+    const mine = ++marksSeq;
+    if (!q || list.length === 0 || id < 0) {
+      marks = null;
+      return;
+    }
+    searchMarks(
+      id,
+      q,
+      list.map((s) => s.id),
+    )
+      .then((m) => {
+        if (mine !== marksSeq) return;
+        marks = new Map(list.flatMap((s, i) => (m[i] ? [[s.id, m[i]] as const] : [])));
+      })
+      .catch(() => {
+        if (mine === marksSeq) marks = null;
+      });
+  });
+
+  /**
+   * 保持原色的段；`null` 表示都保持原色。本身命中（标记 2）的段连同外圈的后代
+   * （按角度包含关系找）都保持原色，里面有命中项（标记 1）的段只有它本身。
+   */
+  const lit = $derived.by(() => {
+    const m = query ? marks : highlight && new Map([...highlight].map((id) => [id, 2]));
+    if (!m) return null;
+    const whole = segments.filter((s) => m.get(s.id) === 2);
     const inside = (s: SunburstSegment, t: SunburstSegment) =>
-      s.start >= t.start - 1e-6 && s.end <= t.end + 1e-6;
-    return new Map(
-      segments.map((s) => [s.id, (s.depth === 1 ? s : tops.find((t) => inside(s, t)))?.id]),
+      t.depth < s.depth && s.start >= t.start - 1e-6 && s.end <= t.end + 1e-6;
+    return new Set(
+      segments.filter((s) => m.has(s.id) || whole.some((t) => inside(s, t))).map((s) => s.id),
     );
   });
 
@@ -170,7 +207,7 @@
   });
 
   $effect(() => {
-    void [segments, width, height, hoverId, selected, highlight, repaint];
+    void [segments, width, height, hoverId, selected, lit, repaint];
     if (!transition) untrack(paint);
   });
 
@@ -252,9 +289,9 @@
       const fadeIn = Math.min(1, Math.max(0, d.depth));
       if (fadeIn <= 0) return;
       if (!arcPath(ctx, d)) return;
-      ctx.globalAlpha = alpha * fadeIn * (dim(s) ? 0.22 : 1);
+      ctx.globalAlpha = alpha * fadeIn;
       const shades = pal.fill[s.category];
-      ctx.fillStyle = shades[i % shades.length];
+      ctx.fillStyle = dim(s) ? pal.muted : shades[i % shades.length];
       ctx.fill();
       ctx.stroke();
     });
@@ -304,7 +341,7 @@
       return;
     }
 
-    const dim = (s: SunburstSegment) => highlight !== null && !highlight.has(topOf.get(s.id) ?? -1);
+    const dim = (s: SunburstSegment) => lit !== null && !lit.has(s.id);
     drawSegments(ctx, segments, same, 1, pal, dim);
 
     const hovered = segments.find((s) => s.id === hoverId);
@@ -371,6 +408,12 @@
     }}
     {onclick}
     onmousedown={(e) => e.button === 1 && e.preventDefault()}
+    draggable="true"
+    ondragstart={(event) => {
+      const h = hit(event);
+      if (h && h !== "center") ondragitem(h.id, event);
+      else event.preventDefault();
+    }}
     onauxclick={(event) => {
       if (event.button !== 1) return;
       event.preventDefault();

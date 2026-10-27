@@ -109,6 +109,14 @@ export interface SearchHit {
   category: CategoryKey;
 }
 
+/**
+ * 搜索结果在图表上的标记，与 `ids` 一一对应：
+ * 2 表示它本身满足条件，1 表示它下面有满足条件的项，0 表示都没有。
+ */
+export function searchMarks(id: number, query: string, ids: number[]): Promise<number[]> {
+  return invoke("search_marks", { id, query, ids });
+}
+
 export interface TreemapRect {
   id: number;
   category: CategoryKey;

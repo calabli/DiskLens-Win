@@ -28,6 +28,7 @@ pub fn run() {
             commands::type_stats,
             commands::bucket_stats,
             commands::search,
+            commands::search_marks,
             cleanup::plan_delete,
             cleanup::delete_items,
             cleanup::link_items,

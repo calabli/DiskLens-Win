@@ -17,4 +17,5 @@ pub use category::Category;
 pub use query::{Item, ParseError, Query};
 pub use stats::{
     Bucket, Buckets, CategoryTotals, ChildBreakdown, breakdown, buckets, dominant_dirs, search,
+    search_marks,
 };

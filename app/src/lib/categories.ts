@@ -64,6 +64,7 @@ export function resolvePalette(el: Element) {
       }),
     ) as Record<CategoryKey, string[]>,
     ink: read("--tile-ink"),
+    muted: read("--tile-muted"),
     gap: read("--tile-gap"),
     accent: read("--accent"),
   };
@@ -105,5 +106,24 @@ export function assignShades(list: readonly TreemapRect[]): Uint8Array {
     while (k < SHADES.length && used & (1 << k)) k++;
     out[i] = k < SHADES.length ? k : i % SHADES.length;
   }
+  return out;
+}
+
+/**
+ * 搜索或筛选时哪些方块保持原色：本身命中（标记 2）的方块连同它里面嵌套的方块，
+ * 以及里面有命中项（标记 1）的方块本身。`list` 按深度优先排列，嵌套的块紧跟在所属块后面。
+ */
+export function litTiles(
+  list: readonly { id: number; level: number }[],
+  marks: ReadonlyMap<number, number>,
+): Uint8Array {
+  const out = new Uint8Array(list.length);
+  /** whole[level]：这一层最近的块是否整块命中。 */
+  const whole: boolean[] = [];
+  list.forEach((r, i) => {
+    const all = (r.level > 1 && whole[r.level - 1]) || marks.get(r.id) === 2;
+    whole[r.level] = all;
+    out[i] = all || marks.get(r.id) === 1 ? 1 : 0;
+  });
   return out;
 }
