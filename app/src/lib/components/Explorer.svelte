@@ -10,6 +10,8 @@
     nodeInfo,
     planClean,
     planDelete,
+    revealInExplorer,
+    type MoveResult,
     refreshScan,
     search,
     typeStats,
@@ -27,6 +29,7 @@
   import ConfirmDelete from "./ConfirmDelete.svelte";
   import Duplicates from "./Duplicates.svelte";
   import Findings from "./Findings.svelte";
+  import MoveDialog from "./MoveDialog.svelte";
   import Similar from "./Similar.svelte";
   import Suggestions from "./Suggestions.svelte";
   import SearchResults from "./SearchResults.svelte";
@@ -94,6 +97,9 @@
   let deleting = $state(false);
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
   let refreshing = $state(false);
+  let menuOpen = $state(false);
+  /** 正在移动的文件夹。 */
+  let moving = $state<{ id: number; name: string; path: string; size: number } | null>(null);
   /** 正在用整理工具（占据主区域）。 */
   let dupOpen = $state(false);
   let toolTab = $state<"suggest" | "dupes" | "similar" | "findings">("suggest");
@@ -420,6 +426,56 @@
     }
   }
 
+  /** “更多”菜单作用的项目：选中的一项，没有选中时是当前文件夹。 */
+  const menuTarget = $derived(selection.length === 1 ? selection[0] : dirId);
+  const menuEntry = $derived(selection.length === 1 ? entries.get(selection[0]) : undefined);
+
+  async function askMove() {
+    menuOpen = false;
+    if (!menuEntry?.isDir) return;
+    try {
+      const n = await nodeInfo(menuEntry.id);
+      moving = { id: n.id, name: n.name, path: n.path, size: n.size };
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
+  async function moved(r: MoveResult) {
+    moving = null;
+    toast = {
+      message: `已移到 ${r.dest}，这个磁盘释放 ${formatSize(r.bytes)}`,
+      detail: [
+        ...(r.leftover ? [`旧文件夹没能完全删除，可以手动删除：${r.leftover}`] : []),
+        ...(r.logError ? [r.logError] : []),
+      ],
+      tone: r.leftover || r.logError ? "warn" : "info",
+    };
+    rootInfo = await nodeInfo(summary.rootId);
+    version++;
+    selectOnly(r.newId);
+  }
+
+  async function showInExplorer() {
+    menuOpen = false;
+    try {
+      await revealInExplorer(menuTarget);
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
+  async function copyPath() {
+    menuOpen = false;
+    try {
+      const { path } = await nodeInfo(menuTarget);
+      await navigator.clipboard.writeText(path);
+      toast = { message: "已复制路径", detail: [path], tone: "info" };
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
   /** 关闭重复文件，在主界面中定位到 `id`。 */
   async function revealNode(id: number) {
     try {
@@ -436,7 +492,11 @@
 
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
-    if (["INPUT", "SELECT"].includes(target.tagName) || plan) return;
+    if (["INPUT", "SELECT"].includes(target.tagName) || plan || moving) return;
+    if (menuOpen && event.key === "Escape") {
+      menuOpen = false;
+      return;
+    }
     if (dupOpen) {
       if (event.key === "Escape") dupOpen = false;
       return;
@@ -617,6 +677,40 @@
         ></path></svg
       ></button
     >
+    <div class="menu-wrap">
+      <button
+        type="button"
+        class="tool"
+        class:on={menuOpen}
+        onclick={() => (menuOpen = !menuOpen)}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label="更多"
+        title="更多"
+        ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
+          ><circle cx="3.5" cy="8" r="1.4" fill="currentColor"></circle><circle
+            cx="8"
+            cy="8"
+            r="1.4"
+            fill="currentColor"
+          ></circle><circle cx="12.5" cy="8" r="1.4" fill="currentColor"></circle></svg
+        ></button
+      >
+      {#if menuOpen}
+        <div class="menu-shield" role="presentation" onclick={() => (menuOpen = false)}></div>
+        <div class="menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!menuEntry?.isDir}
+            title={menuEntry?.isDir ? "" : "先选中一个文件夹"}
+            onclick={askMove}>移动到其他磁盘…</button
+          >
+          <button type="button" role="menuitem" onclick={showInExplorer}>在资源管理器中显示</button>
+          <button type="button" role="menuitem" onclick={copyPath}>复制路径</button>
+        </div>
+      {/if}
+    </div>
     <button
       type="button"
       class="tool"
@@ -913,6 +1007,17 @@
   />
 {/if}
 
+{#if moving}
+  <MoveDialog
+    id={moving.id}
+    name={moving.name}
+    path={moving.path}
+    size={moving.size}
+    onmoved={moved}
+    onclose={() => (moving = null)}
+  />
+{/if}
+
 {#if toast}
   <Toast
     message={toast.message}
@@ -977,6 +1082,47 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  .menu-wrap {
+    position: relative;
+  }
+
+  .menu-shield {
+    position: fixed;
+    inset: 0;
+    z-index: 14;
+  }
+
+  .menu {
+    position: absolute;
+    top: 34px;
+    right: 0;
+    z-index: 15;
+    display: flex;
+    flex-direction: column;
+    min-width: 180px;
+    padding: 5px;
+    border-radius: 10px;
+    background: var(--panel);
+    box-shadow: var(--shadow-lift);
+  }
+
+  .menu button {
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+  }
+
+  .menu button:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .menu button:disabled {
+    opacity: 0.4;
   }
 
   .tools {
