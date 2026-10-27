@@ -3,6 +3,7 @@
   import { searchMarks, sunburst, type SunburstSegment } from "$lib/api";
   import { resolvePalette, type Palette } from "$lib/categories";
   import { formatSize } from "$lib/format";
+  import { onThemeChange } from "$lib/theme";
 
   interface Props {
     dirId: number;
@@ -147,15 +148,14 @@
       height = Math.floor(e.contentRect.height);
     });
     ro.observe(container);
-    const scheme = window.matchMedia("(prefers-color-scheme: dark)");
-    const onScheme = () => {
+    // 切换浅色 / 深色后重新读取配色。
+    const stopTheme = onThemeChange(() => {
       palette = null;
       repaint++;
-    };
-    scheme.addEventListener("change", onScheme);
+    });
     return () => {
       ro.disconnect();
-      scheme.removeEventListener("change", onScheme);
+      stopTheme();
       cancelAnimationFrame(frame);
     };
   });
