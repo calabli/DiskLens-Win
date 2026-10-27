@@ -209,6 +209,8 @@ pub struct DupFile {
     pub modified_ms: u64,
     /// 这个文件一共有几个名称（硬链接数）。大于 1 时删掉这个名称并不释放空间。
     pub links: u32,
+    /// 所在卷的序列号。只有同一个卷上的文件才能互相做硬链接。
+    pub volume: u64,
 }
 
 /// 一组内容完全相同的文件。
@@ -396,6 +398,7 @@ pub fn find_duplicates(
             path: cand.path.clone(),
             modified_ms: c.modified / 1_000_000,
             links: c.links,
+            volume: c.key.volume,
         });
     }
     let mut groups: Vec<DupGroup> = by_full

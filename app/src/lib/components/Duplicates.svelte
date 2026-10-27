@@ -1,5 +1,7 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
+  import { fade, fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import {
     cancelDuplicates,
     findDuplicates,
@@ -7,6 +9,7 @@
     type DupGroup,
     type DupProgress,
     type DupResult,
+    type LinkGroup,
   } from "$lib/api";
   import { formatSize } from "$lib/format";
 
@@ -18,12 +21,14 @@
     removed: Set<number>;
     /** 把勾选的文件交给外层确认并删除。 */
     ondelete: (ids: number[]) => void;
+    /** 把勾选的文件替换为指向保留那份的硬链接（外层执行并提示结果）。 */
+    onlink: (groups: LinkGroup[]) => Promise<void>;
     /** 在主界面中定位这个文件。 */
     onreveal: (id: number) => void;
     onclose: () => void;
   }
 
-  let { rootId, rootName, removed, ondelete, onreveal, onclose }: Props = $props();
+  let { rootId, rootName, removed, ondelete, onlink, onreveal, onclose }: Props = $props();
 
   type Keep = "shortest" | "newest" | "oldest";
 
@@ -106,6 +111,51 @@
       if (String(e) !== "已取消") error = String(e);
     } finally {
       running = false;
+    }
+  }
+
+  /**
+   * 硬链接替换的计划：每组以保留的那份为准，替换勾选的、与它在同一个卷上、且自身没有
+   * 其他硬链接名称的文件（有其他名称的替换了也不释放空间）。
+   */
+  const linkPlan = $derived.by(() => {
+    const plan: LinkGroup[] = [];
+    let size = 0;
+    let count = 0;
+    let crossVolume = 0;
+    let linked = 0;
+    for (const g of groups) {
+      const kept = g.files.filter((f) => !marked.has(f.id));
+      const keep = kept.find((f) => f.links > 1) ?? kept[0];
+      if (!keep) continue;
+      const replace: number[] = [];
+      for (const f of g.files) {
+        if (!marked.has(f.id)) continue;
+        if (f.volume !== keep.volume) crossVolume++;
+        else if (f.links > 1) linked++;
+        else {
+          replace.push(f.id);
+          size += g.size;
+        }
+      }
+      if (replace.length > 0) {
+        plan.push({ keep: keep.id, replace });
+        count += replace.length;
+      }
+    }
+    return { groups: plan, size, count, crossVolume, linked };
+  });
+
+  let confirmLink = $state(false);
+  let linking = $state(false);
+
+  async function link() {
+    linking = true;
+    try {
+      await onlink(linkPlan.groups);
+    } finally {
+      linking = false;
+      confirmLink = false;
     }
   }
 
@@ -296,6 +346,13 @@
       >
       <button
         type="button"
+        class="secondary"
+        disabled={linkPlan.count === 0}
+        title="保留一份数据，其余位置换成指向它的硬链接，文件仍在原处"
+        onclick={() => (confirmLink = true)}>替换为硬链接…</button
+      >
+      <button
+        type="button"
         class="primary"
         disabled={markedCount === 0}
         onclick={() =>
@@ -305,6 +362,48 @@
     </footer>
   {/if}
 </section>
+
+{#if confirmLink}
+  <div class="backdrop" transition:fade={{ duration: 150 }} role="presentation"></div>
+  <div
+    class="sheet"
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby="link-title"
+    transition:fly={{ y: -24, duration: 220, easing: cubicOut }}
+  >
+    <h2 id="link-title">要将 {linkPlan.count} 个文件替换为硬链接吗？</h2>
+    <p>
+      可释放 <strong>{formatSize(linkPlan.size)}</strong
+      >。这些文件仍留在原来的位置、照常打开，但会和保留的那份共用同一份数据：
+      <strong>修改其中任何一处，其余位置也会跟着变</strong>。
+    </p>
+    <p class="muted">
+      替换前会逐字节核对内容，不一致的不替换。被替换的副本不进回收站，因为同样的内容仍在保留的那份里。
+    </p>
+    {#if linkPlan.crossVolume > 0}
+      <p class="muted">
+        另有 {linkPlan.crossVolume} 个文件与保留的那份不在同一个磁盘上，不能做硬链接，将跳过。
+      </p>
+    {/if}
+    {#if linkPlan.linked > 0}
+      <p class="muted">
+        另有 {linkPlan.linked} 个文件本身已有其他硬链接名称，替换也不释放空间，将跳过。
+      </p>
+    {/if}
+    <div class="actions">
+      <button
+        type="button"
+        class="secondary"
+        onclick={() => (confirmLink = false)}
+        disabled={linking}>取消</button
+      >
+      <button type="button" class="primary" onclick={link} disabled={linking}
+        >{linking ? "正在替换…" : "替换为硬链接"}</button
+      >
+    </div>
+  </div>
+{/if}
 
 <style>
   .dupes {
@@ -595,6 +694,51 @@
 
   footer > span {
     flex: 1;
+  }
+
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgb(0 0 0 / 0.25);
+  }
+
+  .sheet {
+    position: fixed;
+    top: 64px;
+    left: 50%;
+    z-index: 21;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(440px, calc(100vw - 32px));
+    padding: 22px 22px 18px;
+    border-radius: 14px;
+    background: var(--panel);
+    box-shadow: var(--shadow-lift);
+    transform: translateX(-50%);
+  }
+
+  .sheet h2 {
+    margin: 0;
+    font-size: 15px;
+    text-align: center;
+  }
+
+  .sheet p {
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .actions button {
+    flex: 1;
+    height: 30px;
   }
 
   .link {

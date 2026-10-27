@@ -1,4 +1,4 @@
-//! 操作日志：每次删除（包括被拦截和失败的）追加一行 JSON 到按月分的文件里。
+//! 操作日志：每次删除或硬链接替换（包括被拦截和失败的）追加一行 JSON 到按月分的文件里。
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -19,25 +19,47 @@ pub struct LogEntry {
     pub result: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// 硬链接替换时，链接到的那个文件。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link_to: Option<String>,
 }
 
 impl LogEntry {
     pub fn new(path: &Path, size: u64, mode: Mode, outcome: &Outcome) -> Self {
+        let action = match mode {
+            Mode::Recycle => "recycle",
+            Mode::Permanent => "delete",
+        };
+        Self::build(action, path, size, outcome, None)
+    }
+
+    /// 把 `path` 替换为指向 `to` 的硬链接。
+    pub fn link(path: &Path, to: &Path, size: u64, outcome: &Outcome) -> Self {
+        let to = Some(to.to_string_lossy().into_owned());
+        Self::build("hardlink", path, size, outcome, to)
+    }
+
+    fn build(
+        action: &'static str,
+        path: &Path,
+        size: u64,
+        outcome: &Outcome,
+        link_to: Option<String>,
+    ) -> Self {
         let (result, reason) = match outcome {
             Outcome::Deleted => ("deleted", None),
+            Outcome::Linked => ("linked", None),
             Outcome::Blocked(r) => ("blocked", Some(r.clone())),
             Outcome::Failed(r) => ("failed", Some(r.clone())),
         };
         Self {
             time: rfc3339(SystemTime::now()),
-            action: match mode {
-                Mode::Recycle => "recycle",
-                Mode::Permanent => "delete",
-            },
+            action,
             path: path.to_string_lossy().into_owned(),
             size,
             result,
             reason,
+            link_to,
         }
     }
 }

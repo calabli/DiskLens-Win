@@ -52,6 +52,8 @@ pub struct DupFile {
     modified_ms: u64,
     /// 硬链接数；大于 1 时删除这个名称不释放空间。
     links: u32,
+    /// 所在卷的序列号，只有同一个卷上的文件才能替换为硬链接。
+    volume: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -174,6 +176,7 @@ fn run(
                     path: f.path.to_string_lossy().into_owned(),
                     modified_ms: f.modified_ms,
                     links: f.links,
+                    volume: f.volume,
                 })
                 .collect(),
         })

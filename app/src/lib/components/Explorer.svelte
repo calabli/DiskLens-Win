@@ -4,6 +4,7 @@
   import { cubicOut } from "svelte/easing";
   import {
     deleteItems,
+    linkItems,
     listChildren,
     nodeInfo,
     planDelete,
@@ -12,6 +13,7 @@
     typeStats,
     type ChildList,
     type DeletePlan,
+    type LinkGroup,
     type NodeInfo,
     type ScanSummary,
     type SearchHit,
@@ -363,6 +365,31 @@
     if (Date.now() - lastRefresh > FOCUS_REFRESH_MS) refresh(false);
   }
 
+  /** 用硬链接替换重复文件，提示结果并刷新视图。 */
+  async function linkDuplicates(groups: LinkGroup[]) {
+    try {
+      const r = await linkItems(groups);
+      toast = {
+        message:
+          r.linked.length > 0
+            ? `已替换 ${r.linked.length} 个文件为硬链接，释放 ${formatSize(r.freed)}`
+            : "没有替换任何文件",
+        detail: [
+          ...r.failed.map((f) => `${f.path}：${f.reason}`),
+          ...(r.logError ? [r.logError] : []),
+        ],
+        tone: r.failed.length > 0 || r.logError ? "warn" : "info",
+      };
+      if (r.linked.length > 0) {
+        removed = new Set([...removed, ...r.linked]);
+        rootInfo = await nodeInfo(summary.rootId);
+        version++;
+      }
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
   /** 关闭重复文件，在主界面中定位到 `id`。 */
   async function revealNode(id: number) {
     try {
@@ -621,6 +648,7 @@
         rootName={title}
         {removed}
         ondelete={(ids) => askDelete(ids)}
+        onlink={linkDuplicates}
         onreveal={revealNode}
         onclose={() => (dupOpen = false)}
       />

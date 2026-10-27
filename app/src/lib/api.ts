@@ -174,6 +174,8 @@ export interface DupFile {
   modifiedMs: number;
   /** 硬链接数；大于 1 时删除这个名称不释放空间。 */
   links: number;
+  /** 所在卷的序列号；只有同一个卷上的文件才能替换为硬链接。 */
+  volume: number;
 }
 
 export interface DupGroup {
@@ -200,6 +202,21 @@ export function findDuplicates(id: number, minSize: number, onProgress: (p: DupP
 }
 
 export const cancelDuplicates = () => invoke<void>("cancel_duplicates");
+
+/** 一组重复文件：保留 `keep`，把 `replace` 替换为指向它的硬链接。 */
+export interface LinkGroup {
+  keep: number;
+  replace: number[];
+}
+
+export interface LinkResult {
+  linked: number[];
+  failed: { path: string; reason: string }[];
+  freed: number;
+  logError: string | null;
+}
+
+export const linkItems = (groups: LinkGroup[]) => invoke<LinkResult>("link_items", { groups });
 
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");

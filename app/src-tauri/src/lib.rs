@@ -25,6 +25,7 @@ pub fn run() {
             commands::search,
             cleanup::plan_delete,
             cleanup::delete_items,
+            cleanup::link_items,
             dupes::find_duplicates,
             dupes::cancel_duplicates,
         ])
