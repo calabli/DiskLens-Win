@@ -21,6 +21,7 @@
   import { formatAgo, formatPercent, formatSize } from "$lib/format";
   import ChildListView from "./ChildList.svelte";
   import ConfirmDelete from "./ConfirmDelete.svelte";
+  import Duplicates from "./Duplicates.svelte";
   import SearchResults from "./SearchResults.svelte";
   import Sunburst from "./Sunburst.svelte";
   import Toast from "./Toast.svelte";
@@ -84,6 +85,10 @@
   let deleting = $state(false);
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
   let refreshing = $state(false);
+  /** 正在看重复文件（占据主区域）。 */
+  let dupOpen = $state(false);
+  /** 本次打开后删除过的项目，用来从重复文件结果里去掉。 */
+  let removed = $state(new Set<number>());
   /** 最近一次增量刷新的结果，显示在状态栏。 */
   let refreshNote = $state<string | null>(null);
   let lastRefresh = 0;
@@ -266,10 +271,10 @@
   }
 
   /** 选中项先给出删除汇总，确认后再删。 */
-  async function askDelete() {
-    if (selection.length === 0 || plan) return;
+  async function askDelete(ids: number[] = selection) {
+    if (ids.length === 0 || plan) return;
     try {
-      plan = await planDelete(selection);
+      plan = await planDelete(ids);
     } catch (e) {
       toast = { message: String(e), detail: [], tone: "warn" };
     }
@@ -293,6 +298,7 @@
       };
       if (done > 0) {
         const gone = new Set(result.deleted);
+        removed = new Set([...removed, ...gone]);
         selection = selection.filter((id) => !gone.has(id));
         if (anchor != null && gone.has(anchor)) anchor = null;
         hoverId = null;
@@ -357,9 +363,27 @@
     if (Date.now() - lastRefresh > FOCUS_REFRESH_MS) refresh(false);
   }
 
+  /** 关闭重复文件，在主界面中定位到 `id`。 */
+  async function revealNode(id: number) {
+    try {
+      const n = await nodeInfo(id);
+      dupOpen = false;
+      if (n.parent != null) {
+        go(n.parent, 0);
+        selectOnly(id);
+      }
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
-    if (target.tagName === "INPUT" || plan) return;
+    if (["INPUT", "SELECT"].includes(target.tagName) || plan) return;
+    if (dupOpen) {
+      if (event.key === "Escape") dupOpen = false;
+      return;
+    }
     if (event.key === "Delete") {
       event.preventDefault();
       askDelete();
@@ -472,8 +496,35 @@
     </span>
     <button
       type="button"
+      class="tool"
+      class:on={dupOpen}
+      onclick={() => (dupOpen = !dupOpen)}
+      aria-pressed={dupOpen}
+      aria-label="查找重复文件"
+      title="在当前文件夹中查找重复文件"
+      ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
+        ><rect
+          x="2"
+          y="4.5"
+          width="8"
+          height="10"
+          rx="1.6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+        ></rect><path
+          d="M5.5 2.5V2.3A.8.8 0 0 1 6.3 1.5h6.4a.8.8 0 0 1 .8.8v8.4a.8.8 0 0 1-.8.8h-.2"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+        ></path></svg
+      ></button
+    >
+    <button
+      type="button"
       class="tool trash"
-      onclick={askDelete}
+      onclick={() => askDelete()}
       disabled={selection.length === 0}
       aria-label="删除选中的 {selection.length} 项（Delete）"
       title="删除选中的项目（Delete）。Ctrl 或 Shift 点按可多选，Ctrl+A 全选"
@@ -564,131 +615,146 @@
   {/each}
 
   <div class="body">
-    <div class="fold list-fold" class:collapsed={!panels.list} inert={!panels.list}>
-      <section class="panel list" aria-label="项目列表">
-        {#if hits}
-          <SearchResults
-            query={searchedFor}
-            {hits}
-            onreveal={reveal}
-            onclose={() => (hits = null)}
+    {#if dupOpen}
+      <Duplicates
+        rootId={dirId}
+        rootName={title}
+        {removed}
+        ondelete={(ids) => askDelete(ids)}
+        onreveal={revealNode}
+        onclose={() => (dupOpen = false)}
+      />
+    {:else}
+      <div class="fold list-fold" class:collapsed={!panels.list} inert={!panels.list}>
+        <section class="panel list" aria-label="项目列表">
+          {#if hits}
+            <SearchResults
+              query={searchedFor}
+              {hits}
+              onreveal={reveal}
+              onclose={() => (hits = null)}
+            />
+          {:else}
+            {#key dirId}
+              <div
+                class="slide"
+                in:fly={{
+                  x: direction * 28,
+                  duration: direction === 0 ? 0 : 240,
+                  easing: cubicOut,
+                }}
+              >
+                <ChildListView
+                  entries={filtered?.entries ?? all.entries}
+                  total={filtered?.total ?? all.total}
+                  parentSize={info?.size ?? 0}
+                  {hoverId}
+                  {selected}
+                  focusId={selectedId}
+                  onhover={(id) => (hoverId = id)}
+                  onopen={open}
+                  onselect={select}
+                />
+              </div>
+            {/key}
+          {/if}
+        </section>
+      </div>
+
+      <section class="panel map" aria-label={panels.chart === "sunburst" ? "旭日图" : "矩形树图"}>
+        <div class="map-head">
+          {#if focus}
+            <strong>{focus.name}</strong>
+            <span
+              >{formatSize(focus.size)} · {formatPercent(focus.size, info?.size ?? 0)}{focus.isDir
+                ? ` · ${focus.files.toLocaleString()} 个文件`
+                : ""}</span
+            >
+          {:else if selection.length > 1}
+            <strong>已选 {selection.length} 项</strong>
+            <span>{formatSize(selectedSize)} · {formatPercent(selectedSize, info?.size ?? 0)}</span>
+          {:else}
+            <span
+              >{panels.chart === "sunburst"
+                ? "点按一圈放大查看，点按圆心返回上一级；Ctrl 点按可多选"
+                : "点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选"}</span
+            >
+          {/if}
+          <div class="chart-switch" role="radiogroup" aria-label="图表类型">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={panels.chart === "treemap"}
+              title="矩形树图"
+              onclick={() => (panels.chart = "treemap")}
+              ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+                ><rect
+                  x="1.5"
+                  y="1.5"
+                  width="13"
+                  height="13"
+                  rx="2.5"
+                  fill="none"
+                  stroke="currentColor"
+                ></rect><path d="M8 1.5v13M8 8.5h6.5M11 8.5v6" stroke="currentColor"></path></svg
+              ></button
+            >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={panels.chart === "sunburst"}
+              title="旭日图"
+              onclick={() => (panels.chart = "sunburst")}
+              ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+                ><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor"></circle><circle
+                  cx="8"
+                  cy="8"
+                  r="2.6"
+                  fill="none"
+                  stroke="currentColor"
+                ></circle><path
+                  d="M8 1.5v3.9M13.6 11.2 10.2 9.3M2.4 11.2l3.4-1.9"
+                  stroke="currentColor"
+                ></path></svg
+              ></button
+            >
+          </div>
+        </div>
+        {#if panels.chart === "sunburst"}
+          <Sunburst
+            {dirId}
+            {version}
+            {title}
+            size={info?.size ?? 0}
+            {hoverId}
+            {selected}
+            {highlight}
+            onhover={(id) => (hoverId = id)}
+            onopen={open}
+            onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+            onup={up}
           />
         {:else}
-          {#key dirId}
-            <div
-              class="slide"
-              in:fly={{ x: direction * 28, duration: direction === 0 ? 0 : 240, easing: cubicOut }}
-            >
-              <ChildListView
-                entries={filtered?.entries ?? all.entries}
-                total={filtered?.total ?? all.total}
-                parentSize={info?.size ?? 0}
-                {hoverId}
-                {selected}
-                focusId={selectedId}
-                onhover={(id) => (hoverId = id)}
-                onopen={open}
-                onselect={select}
-              />
-            </div>
-          {/key}
+          <Treemap
+            {dirId}
+            {version}
+            {entries}
+            {hoverId}
+            {selected}
+            {highlight}
+            onhover={(id) => (hoverId = id)}
+            onopen={open}
+            onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+          />
         {/if}
       </section>
-    </div>
 
-    <section class="panel map" aria-label={panels.chart === "sunburst" ? "旭日图" : "矩形树图"}>
-      <div class="map-head">
-        {#if focus}
-          <strong>{focus.name}</strong>
-          <span
-            >{formatSize(focus.size)} · {formatPercent(focus.size, info?.size ?? 0)}{focus.isDir
-              ? ` · ${focus.files.toLocaleString()} 个文件`
-              : ""}</span
-          >
-        {:else if selection.length > 1}
-          <strong>已选 {selection.length} 项</strong>
-          <span>{formatSize(selectedSize)} · {formatPercent(selectedSize, info?.size ?? 0)}</span>
-        {:else}
-          <span
-            >{panels.chart === "sunburst"
-              ? "点按一圈放大查看，点按圆心返回上一级；Ctrl 点按可多选"
-              : "点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选"}</span
-          >
-        {/if}
-        <div class="chart-switch" role="radiogroup" aria-label="图表类型">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={panels.chart === "treemap"}
-            title="矩形树图"
-            onclick={() => (panels.chart = "treemap")}
-            ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
-              ><rect
-                x="1.5"
-                y="1.5"
-                width="13"
-                height="13"
-                rx="2.5"
-                fill="none"
-                stroke="currentColor"
-              ></rect><path d="M8 1.5v13M8 8.5h6.5M11 8.5v6" stroke="currentColor"></path></svg
-            ></button
-          >
-          <button
-            type="button"
-            role="radio"
-            aria-checked={panels.chart === "sunburst"}
-            title="旭日图"
-            onclick={() => (panels.chart = "sunburst")}
-            ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
-              ><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor"></circle><circle
-                cx="8"
-                cy="8"
-                r="2.6"
-                fill="none"
-                stroke="currentColor"
-              ></circle><path
-                d="M8 1.5v3.9M13.6 11.2 10.2 9.3M2.4 11.2l3.4-1.9"
-                stroke="currentColor"
-              ></path></svg
-            ></button
-          >
-        </div>
+      <div class="fold side-fold" class:collapsed={!panels.side} inert={!panels.side}>
+        <aside class="side">
+          <TypeStats {stats} />
+        </aside>
       </div>
-      {#if panels.chart === "sunburst"}
-        <Sunburst
-          {dirId}
-          {version}
-          {title}
-          size={info?.size ?? 0}
-          {hoverId}
-          {selected}
-          {highlight}
-          onhover={(id) => (hoverId = id)}
-          onopen={open}
-          onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
-          onup={up}
-        />
-      {:else}
-        <Treemap
-          {dirId}
-          {version}
-          {entries}
-          {hoverId}
-          {selected}
-          {highlight}
-          onhover={(id) => (hoverId = id)}
-          onopen={open}
-          onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
-        />
-      {/if}
-    </section>
-
-    <div class="fold side-fold" class:collapsed={!panels.side} inert={!panels.side}>
-      <aside class="side">
-        <TypeStats {stats} />
-      </aside>
-    </div>
+    {/if}
   </div>
 
   <footer>
@@ -794,6 +860,11 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  .tool.on {
+    background: var(--accent-soft);
+    color: var(--accent);
   }
 
   .tool[aria-pressed="true"] {

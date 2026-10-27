@@ -2,8 +2,10 @@
 //! - [`category`]：按扩展名和所在目录把文件归类（用于着色和类型统计）
 //! - [`query`]：搜索语法，例如 `size:>1gb ext:iso;zip 安装`
 //! - [`stats`]：子树的类型统计、每个子项的主要类型、按条件搜索最大的若干项
+//! - [`dupes`]：重复文件（按大小、部分哈希、全文哈希三步判定）
 
 pub mod category;
+pub mod dupes;
 pub mod query;
 pub mod stats;
 

@@ -1,6 +1,7 @@
 mod cache;
 mod cleanup;
 mod commands;
+mod dupes;
 mod refresh;
 mod scan;
 mod volumes;
@@ -24,6 +25,8 @@ pub fn run() {
             commands::search,
             cleanup::plan_delete,
             cleanup::delete_items,
+            dupes::find_duplicates,
+            dupes::cancel_duplicates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

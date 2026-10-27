@@ -160,6 +160,47 @@ export type RefreshResult =
 /** 按 USN 日志增量刷新当前结果。不能增量刷新时返回原因，由调用方决定是否完整重扫。 */
 export const refreshScan = () => invoke<RefreshResult>("refresh_scan");
 
+export interface DupProgress {
+  phase: "checking" | "hashing";
+  filesDone: number;
+  filesTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
+}
+
+export interface DupFile {
+  id: number;
+  path: string;
+  modifiedMs: number;
+  /** 硬链接数；大于 1 时删除这个名称不释放空间。 */
+  links: number;
+}
+
+export interface DupGroup {
+  size: number;
+  files: DupFile[];
+}
+
+export interface DupResult {
+  groups: DupGroup[];
+  moreGroups: number;
+  wasted: number;
+  candidates: number;
+  skipped: number;
+  sameFile: number;
+  bytesRead: number;
+  elapsedMs: number;
+}
+
+/** 在目录 `id` 下查找重复文件。被取消时 Promise 以“已取消”拒绝。 */
+export function findDuplicates(id: number, minSize: number, onProgress: (p: DupProgress) => void) {
+  const channel = new Channel<DupProgress>();
+  channel.onmessage = onProgress;
+  return invoke<DupResult>("find_duplicates", { id, minSize, onEvent: channel });
+}
+
+export const cancelDuplicates = () => invoke<void>("cancel_duplicates");
+
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
 
