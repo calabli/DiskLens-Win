@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { treemap, type Entry, type TreemapRect } from "$lib/api";
-  import { resolvePalette, type Palette } from "$lib/categories";
+  import { assignShades, resolvePalette, type Palette } from "$lib/categories";
   import { formatSize } from "$lib/format";
 
   interface Props {
@@ -222,6 +222,14 @@
     return true;
   }
 
+  // 每份布局只算一次深浅分配。
+  const shadeCache = new WeakMap<TreemapRect[], Uint8Array>();
+  function shadesOf(list: TreemapRect[]) {
+    let s = shadeCache.get(list);
+    if (!s) shadeCache.set(list, (s = assignShades(list)));
+    return s;
+  }
+
   function drawTiles(
     ctx: CanvasRenderingContext2D,
     list: TreemapRect[],
@@ -232,13 +240,13 @@
   ) {
     // 嵌套的块排在所属的顶层块后面，筛选时跟着顶层块一起变淡。
     let top = -1;
+    const pick = shadesOf(list);
     list.forEach((r, i) => {
       if (r.level <= 1) top = r.id;
       const b = map(r);
       if (b.w < 0.5 || b.h < 0.5) return;
       ctx.globalAlpha = alpha * (dim && !dim.has(top) ? 0.22 : 1);
-      const shades = pal.fill[r.category];
-      ctx.fillStyle = shades[i % shades.length];
+      ctx.fillStyle = pal.fill[r.category][pick[i]];
       if (tilePath(ctx, b, b.w > 6 && b.h > 6 ? 1.5 : 0.5)) ctx.fill();
     });
     ctx.globalAlpha = 1;
