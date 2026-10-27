@@ -444,6 +444,28 @@ pub fn bucket_stats(id: NodeId, state: State<'_, AppState>) -> Result<BucketStat
 }
 
 /// 在目录的整棵子树里搜索，返回最大的 `limit` 项。
+/// 按完整路径找到扫描结果里的节点；不在扫描范围内或已不存在时返回 `None`。
+#[tauri::command]
+pub fn locate(path: String, state: State<'_, AppState>) -> Result<Option<NodeId>, String> {
+    let scan = state.current()?;
+    let t = scan.read();
+    let root = t.root();
+    let base = t.path(root);
+    let rest = if path.len() >= base.len() && path[..base.len()].eq_ignore_ascii_case(&base) {
+        &path[base.len()..]
+    } else {
+        return Ok(None);
+    };
+    let mut id = root;
+    for part in rest.split('\\').filter(|p| !p.is_empty()) {
+        match t.child_by_name(id, part) {
+            Some(c) => id = c,
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(id))
+}
+
 /// 图表上标出搜索结果：`ids` 是画出来的方块，返回每一项的标记，见 [`dl_analyze::search_marks`]。
 #[tauri::command]
 pub fn search_marks(

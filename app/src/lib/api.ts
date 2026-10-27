@@ -37,6 +37,8 @@ export interface ScanSummary {
   fileCount: number;
   nodeCount: number;
   skipped: number;
+  /** 读不了的文件夹（最多记前 2000 个，总数是 `skipped`）。 */
+  unreadable: UnreadableDir[];
   elapsedMs: number;
   /** 扫描完成的时间（Unix 毫秒）。 */
   scannedAt: number;
@@ -115,6 +117,32 @@ export interface SearchHit {
  */
 export function searchMarks(id: number, query: string, ids: number[]): Promise<number[]> {
   return invoke("search_marks", { id, query, ids });
+}
+
+/** 扫描时读不了的文件夹和原因。 */
+export interface UnreadableDir {
+  path: string;
+  reason: string;
+}
+
+/** 按完整路径找到扫描结果里的节点；找不到时为 `null`。 */
+export function locate(path: string): Promise<number | null> {
+  return invoke("locate", { path });
+}
+
+/** 当前是否以管理员身份运行。 */
+export function isElevated(): Promise<boolean> {
+  return invoke("is_elevated");
+}
+
+/** 以管理员身份重新启动，启动后扫描 `scan`。用户在 UAC 提示里取消时以“已取消”拒绝。 */
+export function restartAsAdmin(scan: string | null): Promise<void> {
+  return invoke("restart_as_admin", { scan });
+}
+
+/** 以管理员身份重新启动时要扫描的路径；正常启动时为 `null`。 */
+export function startupScan(): Promise<string | null> {
+  return invoke("startup_scan");
 }
 
 export interface TreemapRect {

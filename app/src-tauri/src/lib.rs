@@ -1,3 +1,4 @@
+mod admin;
 mod cache;
 mod cleanup;
 mod commands;
@@ -12,10 +13,14 @@ mod volumes;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    admin::wait_for_previous();
     tauri::Builder::default()
         .manage(scan::AppState::default())
         .invoke_handler(tauri::generate_handler![
             volumes::list_volumes,
+            admin::is_elevated,
+            admin::restart_as_admin,
+            admin::startup_scan,
             scan::start_scan,
             scan::cancel_scan,
             cache::cached_scans,
@@ -29,6 +34,7 @@ pub fn run() {
             commands::bucket_stats,
             commands::search,
             commands::search_marks,
+            commands::locate,
             cleanup::plan_delete,
             cleanup::delete_items,
             cleanup::link_items,

@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::scan::{AppState, ScanMode, ScanSummary, Scanned};
+use crate::scan::{AppState, ScanMode, ScanSummary, Scanned, UnreadableDir};
 
 const EXT: &str = "dlscan";
 
@@ -24,6 +24,9 @@ pub struct CacheMeta {
     pub mode: ScanMode,
     pub fallback_reason: Option<String>,
     pub skipped: u64,
+    /// 读不了的文件夹；旧版本的缓存里没有。
+    #[serde(default)]
+    pub unreadable: Vec<UnreadableDir>,
     pub elapsed_ms: u64,
     /// 扫描完成的时间（Unix 毫秒）。
     pub scanned_at: u64,
@@ -99,6 +102,7 @@ fn save(scan: &Scanned) -> Result<(), String> {
         mode: s.mode,
         fallback_reason: s.fallback_reason.clone(),
         skipped: s.skipped,
+        unreadable: s.unreadable.clone(),
         elapsed_ms: s.elapsed_ms,
         scanned_at: s.scanned_at,
         total_size: tree.size(tree.root()),
@@ -156,6 +160,7 @@ pub async fn open_cached(root: String, state: State<'_, AppState>) -> Result<Sca
         file_count: 0,
         node_count: 0,
         skipped: meta.skipped,
+        unreadable: meta.unreadable,
         elapsed_ms: meta.elapsed_ms,
         scanned_at: meta.scanned_at,
         from_cache: true,

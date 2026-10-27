@@ -5,7 +5,8 @@
 //!
 //! 不跟随符号链接和连接点，避免重复统计和循环；它们本身作为空的项记在树上（与 MFT 直读一致），
 //! 以便之后查找失效链接。其他重解析点（例如 OneDrive 按需下载的文件夹）照常进入。
-//! 读不了的目录计入 [`WalkResult::skipped`] 后继续，不中断整次扫描。
+//! 读不了的目录计入 [`WalkResult::skipped`]，并在 [`WalkResult::unreadable`] 里记下路径和原因，
+//! 然后继续，不中断整次扫描。
 //!
 //! 占用空间：Windows 上用 `GetCompressedFileSizeW` 取实际占用（压缩、稀疏文件都准确），
 //! 再按簇向上取整。很小的文件在 NTFS 上可能直接存在 MFT 记录里、不占簇，这里会多算
@@ -23,12 +24,25 @@ use dl_tree::{FileTree, NodeId};
 
 /// 每处理这么多条目回调一次进度。
 const PROGRESS_EVERY: u64 = 10_000;
+/// 最多记下这么多个读不了的目录的路径；总数仍在 `skipped` 里。
+pub const MAX_UNREADABLE: usize = 2_000;
 
 #[derive(Debug)]
 pub struct WalkResult {
     pub tree: FileTree,
     /// 因权限等原因无法读取的目录数。
     pub skipped: u64,
+    /// 读不了的目录（最多 [`MAX_UNREADABLE`] 个），按路径排序。
+    pub unreadable: Vec<Unreadable>,
+}
+
+/// 一个读不了的目录。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unreadable {
+    pub path: PathBuf,
+    pub kind: io::ErrorKind,
+    /// 系统错误码（Windows 上是 `GetLastError` 的值）。
+    pub code: Option<i32>,
 }
 
 /// 遍历 `root`，返回已汇总大小的文件树。
@@ -164,6 +178,7 @@ fn run(
     let next_id = AtomicUsize::new(1);
     let seen = AtomicU64::new(0);
     let skipped = AtomicU64::new(0);
+    let unreadable = Mutex::new(Vec::new());
     let cancelled = AtomicBool::new(false);
 
     let listings: Vec<(usize, Vec<Item>)> = thread::scope(|s| {
@@ -251,8 +266,16 @@ fn run(
                                     }
                                 }
                             }
-                            Err(_) => {
+                            Err(e) => {
                                 skipped.fetch_add(1, Ordering::Relaxed);
+                                let mut list = unreadable.lock().expect("unreadable poisoned");
+                                if list.len() < MAX_UNREADABLE {
+                                    list.push(Unreadable {
+                                        path: path.clone(),
+                                        kind: e.kind(),
+                                        code: e.raw_os_error(),
+                                    });
+                                }
                             }
                         }
                         if let (Some(l), Some(t)) = (live, top)
@@ -280,9 +303,12 @@ fn run(
     let (m, a) = times(&meta);
     tree.set_times(tree.root(), m, a);
     progress(seen.into_inner());
+    let mut unreadable = unreadable.into_inner().expect("unreadable poisoned");
+    unreadable.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(WalkResult {
         tree,
         skipped: skipped.into_inner(),
+        unreadable,
     })
 }
 
@@ -504,8 +530,13 @@ mod tests {
         fs::write(tmp.0.join("a/b/two.bin"), vec![0u8; 250]).unwrap();
         fs::write(tmp.0.join("top.txt"), b"hello").unwrap();
 
-        let WalkResult { tree, skipped } = walk(&tmp.0).unwrap();
+        let WalkResult {
+            tree,
+            skipped,
+            unreadable,
+        } = walk(&tmp.0).unwrap();
         assert_eq!(skipped, 0);
+        assert!(unreadable.is_empty());
         assert_eq!(tree.size(tree.root()), 1_255);
         assert_eq!(tree.file_count(tree.root()), 3);
         // 每个小文件至少占一个簇。

@@ -4,6 +4,7 @@
     cancelScan,
     openCached,
     startScan,
+    startupScan,
     type CachedScan,
     type LiveEntry,
     type ScanMode,
@@ -86,11 +87,13 @@
   }
 
   // 启动时直接显示最近一次的扫描结果；没有缓存时停在首页。
+  // 以管理员身份重新启动时，直接重新扫描指定的路径。
   $effect(() => {
-    cachedScans()
-      .then((c) => {
+    Promise.all([cachedScans(), startupScan().catch(() => null)])
+      .then(([c, rescan]) => {
         cached = c;
-        if (c.length > 0) open(c[0].root);
+        if (rescan) scan(rescan);
+        else if (c.length > 0) open(c[0].root);
         else phase = "home";
       })
       .catch(() => (phase = "home"));

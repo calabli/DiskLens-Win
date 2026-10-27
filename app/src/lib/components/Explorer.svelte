@@ -48,6 +48,7 @@
   import SearchResults from "./SearchResults.svelte";
   import Sunburst from "./Sunburst.svelte";
   import Toast from "./Toast.svelte";
+  import Unreadable from "./Unreadable.svelte";
   import Treemap from "./Treemap.svelte";
   import TypeStats from "./TypeStats.svelte";
 
@@ -179,6 +180,8 @@
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
   let refreshing = $state(false);
   let menuOpen = $state(false);
+  /** 正在查看读不到的文件夹。 */
+  let unreadableOpen = $state(false);
   let theme = $state<ThemeMode>(themeMode());
   const THEMES: { key: ThemeMode; label: string }[] = [
     { key: "system", label: "跟随系统" },
@@ -758,7 +761,7 @@
 
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
-    if (["INPUT", "SELECT"].includes(target.tagName) || plan || moving) return;
+    if (["INPUT", "SELECT"].includes(target.tagName) || plan || moving || unreadableOpen) return;
     if ((menuOpen || ctx) && event.key === "Escape") {
       menuOpen = false;
       ctx = null;
@@ -1376,9 +1379,13 @@
         rootInfo?.size ?? summary.totalSize,
       )}，占用 {formatSize(rootInfo?.allocated ?? summary.totalAllocated)}，扫描用时 {(
         summary.elapsedMs / 1000
-      ).toFixed(1)} 秒{summary.skipped > 0
-        ? `，${summary.skipped} 个文件夹无权读取`
-        : ""}，{refreshNote ??
+      ).toFixed(1)} 秒{#if summary.skipped > 0}，<button
+          type="button"
+          class="status-link"
+          title="查看读不到的文件夹和原因"
+          onclick={() => (unreadableOpen = true)}
+          >{summary.skipped.toLocaleString()} 个文件夹读不到</button
+        >{/if}，{refreshNote ??
         (summary.fromCache
           ? `这是${formatAgo(summary.scannedAt)}的扫描结果`
           : `扫描于${formatAgo(summary.scannedAt)}`)}
@@ -1445,6 +1452,20 @@
         : "删除…"}</button
     >
   </div>
+{/if}
+
+{#if unreadableOpen}
+  <Unreadable
+    root={summary.root}
+    total={summary.skipped}
+    dirs={summary.unreadable}
+    onreveal={(id) => {
+      unreadableOpen = false;
+      revealNode(id);
+    }}
+    onexplore={explore}
+    onclose={() => (unreadableOpen = false)}
+  />
 {/if}
 
 {#if moving}
@@ -2106,6 +2127,16 @@
 
   .sep {
     color: var(--ink-3);
+  }
+
+  .status-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--warn);
+    font: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .status {
