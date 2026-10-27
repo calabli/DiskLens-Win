@@ -157,7 +157,7 @@ pub(crate) async fn execute(
         for ((id, outcome), target) in ids.into_iter().zip(outcomes).zip(targets) {
             match outcome {
                 // `run` 只删除，不会产生 Linked。
-                Outcome::Deleted | Outcome::Linked => {
+                Outcome::Deleted | Outcome::Linked | Outcome::Moved => {
                     result.freed += target.size;
                     t.detach(id);
                     result.deleted.push(id);
@@ -254,7 +254,7 @@ pub async fn link_items(
                     t.set_file_size(id, 0, 0);
                     result.linked.push(id);
                 }
-                Outcome::Deleted => {}
+                Outcome::Deleted | Outcome::Moved => {}
                 Outcome::Blocked(reason) | Outcome::Failed(reason) => {
                     result.failed.push(Failure {
                         path: target.path.to_string_lossy().into_owned(),

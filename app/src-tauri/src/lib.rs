@@ -2,6 +2,7 @@ mod cache;
 mod cleanup;
 mod commands;
 mod dupes;
+mod files;
 mod findings;
 mod refresh;
 mod rules;
@@ -29,6 +30,8 @@ pub fn run() {
             cleanup::plan_delete,
             cleanup::delete_items,
             cleanup::link_items,
+            files::move_folder,
+            files::reveal_in_explorer,
             rules::clean_suggestions,
             rules::plan_clean,
             rules::clean_rules,

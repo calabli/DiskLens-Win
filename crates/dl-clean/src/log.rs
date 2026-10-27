@@ -19,7 +19,7 @@ pub struct LogEntry {
     pub result: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// 硬链接替换时，链接到的那个文件。
+    /// 硬链接替换时链接到的文件；移动时的新位置。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link_to: Option<String>,
 }
@@ -31,6 +31,12 @@ impl LogEntry {
             Mode::Permanent => "delete",
         };
         Self::build(action, path, size, outcome, None)
+    }
+
+    /// 把文件夹 `path` 移到 `to`，原位置留下连接点。
+    pub fn moved(path: &Path, to: &Path, size: u64, outcome: &Outcome) -> Self {
+        let to = Some(to.to_string_lossy().into_owned());
+        Self::build("move", path, size, outcome, to)
     }
 
     /// 把 `path` 替换为指向 `to` 的硬链接。
@@ -49,6 +55,7 @@ impl LogEntry {
         let (result, reason) = match outcome {
             Outcome::Deleted => ("deleted", None),
             Outcome::Linked => ("linked", None),
+            Outcome::Moved => ("moved", None),
             Outcome::Blocked(r) => ("blocked", Some(r.clone())),
             Outcome::Failed(r) => ("failed", Some(r.clone())),
         };

@@ -4,12 +4,14 @@
 //! - [`protect`]：哪些路径不能直接删除
 //! - [`delete`]：删除到回收站或彻底删除
 //! - [`link`]：用硬链接替换内容相同的文件
+//! - [`relocate`]：把文件夹移到另一个磁盘，原位置留下连接点
 //! - [`log`]：操作日志（JSON Lines）
 
 pub mod delete;
 pub mod link;
 pub mod log;
 pub mod protect;
+pub mod relocate;
 pub mod rules;
 
 use std::path::PathBuf;
@@ -30,6 +32,8 @@ pub enum Outcome {
     Deleted,
     /// 已替换为硬链接。
     Linked,
+    /// 已移到另一个磁盘，原位置是连接点。
+    Moved,
     /// 受保护，没有尝试删除。
     Blocked(String),
     Failed(String),

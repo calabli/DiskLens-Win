@@ -311,6 +311,30 @@ export const planClean = (ruleIds: string[]) => invoke<DeletePlan>("plan_clean",
 export const cleanRules = (ruleIds: string[], permanent: boolean) =>
   invoke<DeleteResult>("clean_rules", { ruleIds, permanent });
 
+export interface MoveResult {
+  /** 原位置现在是连接点，在树上换成了新的节点。 */
+  newId: number;
+  dest: string;
+  bytes: number;
+  files: number;
+  /** 旧文件夹没能完全删除时的位置。 */
+  leftover: string | null;
+  logError: string | null;
+}
+
+/** 把文件夹移到 `destDir` 下（保留原名），原位置留下连接点。 */
+export function moveFolder(
+  id: number,
+  destDir: string,
+  onProgress: (done: number, total: number) => void,
+) {
+  const channel = new Channel<{ done: number; total: number }>();
+  channel.onmessage = (p) => onProgress(p.done, p.total);
+  return invoke<MoveResult>("move_folder", { id, destDir, onEvent: channel });
+}
+
+export const revealInExplorer = (id: number) => invoke<void>("reveal_in_explorer", { id });
+
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
 
