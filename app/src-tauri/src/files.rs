@@ -1,4 +1,4 @@
-//! 文件管理：把文件夹移到其他磁盘（原位置留连接点），以及在资源管理器中显示。
+//! 文件管理：把文件夹移到其他磁盘（原位置留连接点）、在资源管理器中显示、查询所有者。
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -117,6 +117,90 @@ pub fn reveal_in_explorer(id: NodeId, state: State<'_, AppState>) -> Result<(), 
         t.path(id)
     };
     open_explorer(&path).map_err(|e| format!("无法打开资源管理器：{e}"))
+}
+
+/// 各项目的所有者（“域\用户名”或用户名）；查不到的为 `None`。逐个读安全描述符，
+/// 只给界面上看得见的几十行用。
+#[tauri::command]
+pub async fn owners(
+    ids: Vec<NodeId>,
+    state: State<'_, AppState>,
+) -> Result<Vec<Option<String>>, String> {
+    let scan = state.current()?;
+    let paths: Vec<Option<String>> = {
+        let t = scan.read();
+        ids.iter()
+            .map(|&id| check(&t, id).ok().map(|()| t.path(id)))
+            .collect()
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .iter()
+            .map(|p| p.as_deref().and_then(owner_of))
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(windows)]
+fn owner_of(path: &str) -> Option<String> {
+    use windows_sys::Win32::Foundation::{ERROR_SUCCESS, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::{
+        LookupAccountSidW, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    };
+
+    let wide: Vec<u16> = path.encode_utf16().chain([0]).collect();
+    let mut owner: PSID = std::ptr::null_mut();
+    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    // SAFETY: `wide` 以 0 结尾；输出指针都指向有效的局部变量；成功时 `sd` 需要用 LocalFree 释放。
+    let err = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if err != ERROR_SUCCESS {
+        return None;
+    }
+    let (mut name, mut domain) = ([0u16; 256], [0u16; 256]);
+    let (mut name_len, mut domain_len, mut kind) = (256u32, 256u32, 0);
+    // SAFETY: `owner` 指向 `sd` 里的 SID，在释放 `sd` 之前有效；缓冲区长度如实传入。
+    let ok = unsafe {
+        LookupAccountSidW(
+            std::ptr::null(),
+            owner,
+            name.as_mut_ptr(),
+            &mut name_len,
+            domain.as_mut_ptr(),
+            &mut domain_len,
+            &mut kind,
+        )
+    };
+    // SAFETY: `sd` 由 GetNamedSecurityInfoW 分配。
+    unsafe { LocalFree(sd) };
+    if ok == 0 {
+        return None;
+    }
+    let name = String::from_utf16_lossy(&name[..name_len as usize]);
+    let domain = String::from_utf16_lossy(&domain[..domain_len as usize]);
+    Some(if domain.is_empty() {
+        name
+    } else {
+        format!(r"{domain}\{name}")
+    })
+}
+
+#[cfg(not(windows))]
+fn owner_of(_: &str) -> Option<String> {
+    None
 }
 
 #[cfg(windows)]

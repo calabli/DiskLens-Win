@@ -8,6 +8,8 @@
     dirId: number;
     /** 数据版本；删除或刷新后递增，促使重新取布局。 */
     version: number;
+    /** 画几圈。 */
+    depth: number;
     /** 圆心显示的名称和大小。 */
     title: string;
     size: number;
@@ -22,11 +24,13 @@
     onselect: (id: number, toggle: boolean) => void;
     /** 点按圆心：返回上一级。 */
     onup: () => void;
+    oncontext: (id: number, event: MouseEvent) => void;
   }
 
   let {
     dirId,
     version,
+    depth,
     title,
     size,
     hoverId,
@@ -36,10 +40,8 @@
     onopen,
     onselect,
     onup,
+    oncontext,
   }: Props = $props();
-
-  /** 与 Rust 侧 `SUNBURST_DEPTH` 一致。 */
-  const RINGS = 5;
   /** 圆心空洞占半径的比例。 */
   const HOLE = 0.26;
   const DURATION = 460;
@@ -85,7 +87,8 @@
   const geometry = $derived.by(() => {
     const radius = Math.max(0, Math.min(width, height) / 2 - 6);
     const hole = radius * HOLE;
-    return { cx: width / 2, cy: height / 2, radius, hole, ring: (radius - hole) / RINGS };
+    const rings = Math.max(2, depth || 5);
+    return { cx: width / 2, cy: height / 2, radius, hole, ring: (radius - hole) / rings };
   });
 
   /** 每段所属的第 1 圈祖先（按角度包含关系找），筛选时整支变淡。 */
@@ -122,6 +125,7 @@
   $effect(() => {
     const id = dirId;
     void version;
+    void depth;
     const mine = ++request;
     const navigating = id !== shownDir;
     const previous = untrack(() => segments);
@@ -131,7 +135,7 @@
     const focus = animate ? previous.find((s) => s.id === id) : undefined;
     if (focus) begin({ kind: "zoom", outer: previous, inner: null, focus, from: 0, to: 1 });
 
-    sunburst(id)
+    sunburst(id, depth)
       .then((next) => {
         if (mine !== request) return;
         if (focus && transition?.kind === "zoom" && transition.to === 1) {
@@ -363,6 +367,11 @@
       onhover(null);
     }}
     {onclick}
+    oncontextmenu={(event) => {
+      event.preventDefault();
+      const h = hit(event);
+      if (h && h !== "center") oncontext(h.id, event);
+    }}
   ></canvas>
   {#if width > 0}
     <div

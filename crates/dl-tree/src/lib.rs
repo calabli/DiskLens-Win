@@ -14,7 +14,7 @@
 //! 用于删除文件和按 USN 日志增量刷新。新节点总是追加在末尾，已有节点的 id 不变。
 //!
 //! 每个节点可以带一个 `u64` 键，表示它在来源中的编号（例如 MFT 记录号），
-//! 增量刷新时用来把变化对应到节点。
+//! 增量刷新时用来把变化对应到节点；还可以带修改时间和访问时间（Unix 秒，0 表示未知）。
 
 mod codec;
 mod layout;
@@ -55,6 +55,10 @@ pub struct FileTree {
     names: String,
     /// 节点在来源中的编号；没有设置过任何键时为空。
     keys: Vec<u64>,
+    /// 修改时间（Unix 秒，0 表示未知）；没有设置过任何时间时为空。
+    modified: Vec<u32>,
+    /// 访问时间，规则同 `modified`。
+    accessed: Vec<u32>,
     finalized: bool,
 }
 
@@ -93,6 +97,8 @@ impl FileTree {
             + cap(&self.name_start)
             + cap(&self.name_len)
             + cap(&self.keys)
+            + cap(&self.modified)
+            + cap(&self.accessed)
             + self.names.capacity()
     }
 
@@ -108,6 +114,8 @@ impl FileTree {
         self.name_start.shrink_to_fit();
         self.name_len.shrink_to_fit();
         self.keys.shrink_to_fit();
+        self.modified.shrink_to_fit();
+        self.accessed.shrink_to_fit();
         self.names.shrink_to_fit();
     }
 
@@ -174,7 +182,36 @@ impl FileTree {
         if !self.keys.is_empty() {
             self.keys.push(NO_KEY);
         }
+        if !self.modified.is_empty() {
+            self.modified.push(0);
+            self.accessed.push(0);
+        }
         id
+    }
+
+    /// 设置节点的修改时间和访问时间（Unix 秒，0 表示未知）。
+    pub fn set_times(&mut self, id: NodeId, modified: u32, accessed: u32) {
+        if self.modified.is_empty() {
+            self.modified = vec![0; self.len()];
+            self.accessed = vec![0; self.len()];
+        }
+        self.modified[id as usize] = modified;
+        self.accessed[id as usize] = accessed;
+    }
+
+    /// 修改时间（Unix 秒）；未知时为 0。
+    pub fn modified(&self, id: NodeId) -> u32 {
+        self.modified.get(id as usize).copied().unwrap_or(0)
+    }
+
+    /// 访问时间（Unix 秒）；未知时为 0。
+    pub fn accessed(&self, id: NodeId) -> u32 {
+        self.accessed.get(id as usize).copied().unwrap_or(0)
+    }
+
+    /// 是否记录了时间。
+    pub fn has_times(&self) -> bool {
+        !self.modified.is_empty()
     }
 
     /// 设置节点的键。
@@ -574,6 +611,21 @@ mod tests {
         assert!(t.move_to(d, users));
         assert_eq!(t.size(0), 8_010);
         assert!(t.is_attached(f));
+    }
+
+    #[test]
+    fn times_are_optional() {
+        let mut t = sample();
+        assert!(!t.has_times());
+        assert_eq!(t.modified(1), 0);
+        t.set_times(1, 1_700_000_000, 1_750_000_000);
+        assert_eq!(
+            (t.modified(1), t.accessed(1)),
+            (1_700_000_000, 1_750_000_000)
+        );
+        assert_eq!(t.modified(2), 0);
+        let n = t.insert(0, "new", NodeKind::File, 1, 1);
+        assert_eq!(t.modified(n), 0);
     }
 
     #[test]

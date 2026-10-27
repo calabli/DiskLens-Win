@@ -27,6 +27,14 @@ export function formatAgo(ms: number, now = Date.now()): string {
   return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
 }
 
+/** Unix 秒格式化为日期，例如 2026/10/27；0 表示未知，显示为“—”。 */
+export function formatDate(secs: number): string {
+  if (!secs) return "—";
+  const d = new Date(secs * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+}
+
 /** 百分比，保留一位小数。 */
 export function formatPercent(part: number, whole: number): string {
   return whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : "0.0%";

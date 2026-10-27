@@ -364,6 +364,8 @@ struct Collector {
     flags: Vec<u8>,
     size: Vec<u64>,
     allocated: Vec<u64>,
+    /// 修改时间、访问时间（Unix 秒），来自基记录的 `$STANDARD_INFORMATION`。
+    times: Vec<(u32, u32)>,
     links: Vec<Link>,
     names: String,
     in_use: u64,
@@ -378,6 +380,7 @@ impl Collector {
             flags: vec![0; records],
             size: vec![0; records],
             allocated: vec![0; records],
+            times: vec![(0, 0); records],
             links: Vec::with_capacity(records),
             names: String::with_capacity(records * 16),
             in_use: 0,
@@ -405,6 +408,7 @@ impl Collector {
         }
         if record.base == 0 {
             self.flags[target] |= IN_USE | if record.is_dir { IS_DIR } else { 0 };
+            self.times[target] = (record.modified, record.accessed);
             self.in_use += 1;
         }
         for s in &record.streams {
@@ -459,6 +463,8 @@ impl Collector {
         placed[ROOT_RECORD] = true;
         // 每个节点记下它的 MFT 记录号，USN 增量刷新时据此找到节点。
         tree.set_key(tree.root(), ROOT_RECORD as u64);
+        let (m, a) = self.times[ROOT_RECORD];
+        tree.set_times(tree.root(), m, a);
         queue.push_back((ROOT_RECORD, tree.root()));
 
         while let Some((dir, node)) = queue.pop_front() {
@@ -477,6 +483,8 @@ impl Collector {
                     placed[child] = true;
                     let id = tree.add_dir(node, name);
                     tree.set_key(id, child as u64);
+                    let (m, a) = self.times[child];
+                    tree.set_times(id, m, a);
                     queue.push_back((child, id));
                 } else {
                     placed[child] = true;
@@ -488,6 +496,8 @@ impl Collector {
                     };
                     let id = tree.add_file(node, name, size, allocated);
                     tree.set_key(id, child as u64);
+                    let (m, a) = self.times[child];
+                    tree.set_times(id, m, a);
                 }
             }
         }

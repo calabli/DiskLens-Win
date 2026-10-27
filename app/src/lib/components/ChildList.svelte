@@ -1,7 +1,26 @@
+<script lang="ts" module>
+  /** 可选的列。名称列总是显示。 */
+  export type ColumnKey =
+    "size" | "allocated" | "percent" | "files" | "modified" | "accessed" | "owner";
+  export type SortKey = "name" | "size" | "allocated" | "files" | "modified" | "accessed";
+
+  export const COLUMNS: { key: ColumnKey; label: string; width: string; sort?: SortKey }[] = [
+    { key: "size", label: "大小", width: "72px", sort: "size" },
+    { key: "allocated", label: "占用", width: "72px", sort: "allocated" },
+    { key: "percent", label: "占比", width: "108px", sort: "size" },
+    { key: "files", label: "项目", width: "64px", sort: "files" },
+    { key: "modified", label: "修改时间", width: "84px", sort: "modified" },
+    { key: "accessed", label: "访问时间", width: "84px", sort: "accessed" },
+    { key: "owner", label: "所有者", width: "120px" },
+  ];
+
+  export const DEFAULT_COLUMNS: ColumnKey[] = ["size", "percent", "files"];
+</script>
+
 <script lang="ts">
   import type { Entry, SelectMode } from "$lib/api";
   import { CATEGORIES } from "$lib/categories";
-  import { formatPercent, formatSize } from "$lib/format";
+  import { formatDate, formatPercent, formatSize } from "$lib/format";
 
   interface Props {
     entries: Entry[];
@@ -14,13 +33,50 @@
     selected: Set<number>;
     /** 最近选中的一项，保持在可见范围内。 */
     focusId: number | null;
+    /** 显示的可选列，按 COLUMNS 的顺序。 */
+    columns: ColumnKey[];
+    sort: { key: SortKey; desc: boolean };
+    /** 已经查到的所有者；`null` 表示查不到。 */
+    owners: Map<number, string | null>;
     onhover: (id: number | null) => void;
     onopen: (id: number) => void;
     onselect: (id: number, mode: SelectMode) => void;
+    onsort: (key: SortKey) => void;
+    oncolumns: (columns: ColumnKey[]) => void;
+    /** 可见的行变化时通知，用来按需查询所有者。 */
+    onvisible: (ids: number[]) => void;
+    oncontext: (id: number, event: MouseEvent) => void;
   }
 
-  let { entries, total, parentSize, hoverId, selected, focusId, onhover, onopen, onselect }: Props =
-    $props();
+  let {
+    entries,
+    total,
+    parentSize,
+    hoverId,
+    selected,
+    focusId,
+    columns,
+    sort,
+    owners,
+    onhover,
+    onopen,
+    onselect,
+    onsort,
+    oncolumns,
+    onvisible,
+    oncontext,
+  }: Props = $props();
+
+  let picking = $state(false);
+  const shown = $derived(COLUMNS.filter((c) => columns.includes(c.key)));
+  const template = $derived(
+    ["20px", "minmax(0, 1fr)", ...shown.map((c) => c.width), "18px"].join(" "),
+  );
+
+  function toggleColumn(key: ColumnKey) {
+    const next = columns.includes(key) ? columns.filter((k) => k !== key) : [...columns, key];
+    oncolumns(COLUMNS.map((c) => c.key).filter((k) => next.includes(k)));
+  }
 
   const ROW = 30;
   /** 可见区域上下多渲染的行数，滚动时不闪白。 */
@@ -34,7 +90,15 @@
   const last = $derived(
     Math.min(entries.length, Math.ceil((scrollTop + viewHeight) / ROW) + OVERSCAN),
   );
-  const largest = $derived(entries[0]?.size || 1);
+  const largest = $derived(entries.reduce((m, e) => Math.max(m, e.size), 0) || 1);
+
+  // 可见的行变化时告诉外层（只在显示所有者列时需要）。
+  $effect(() => {
+    if (!columns.includes("owner")) return;
+    const ids = entries.slice(first, last).map((e) => e.id);
+    const timer = setTimeout(() => onvisible(ids), 120);
+    return () => clearTimeout(timer);
+  });
 
   // 选中的项滚到可见范围内（例如从树图点选、返回上一级后）。
   $effect(() => {
@@ -57,10 +121,47 @@
 </script>
 
 <div class="list">
-  <div class="head" aria-hidden="true">
-    <span></span><span>名称</span><span class="num">大小</span><span></span><span class="num"
-      >占比</span
-    ><span class="num">项目</span>
+  <div class="head" style:grid-template-columns={template}>
+    <span></span>
+    <button type="button" class="sort" onclick={() => onsort("name")}
+      >名称{sort.key === "name" ? (sort.desc ? " ↓" : " ↑") : ""}</button
+    >
+    {#each shown as c (c.key)}
+      {#if c.sort}
+        <button type="button" class="sort num" onclick={() => c.sort && onsort(c.sort)}
+          >{c.label}{sort.key === c.sort && c.key !== "percent"
+            ? sort.desc
+              ? " ↓"
+              : " ↑"
+            : ""}</button
+        >
+      {:else}
+        <span class="num">{c.label}</span>
+      {/if}
+    {/each}
+    <span class="pick">
+      <button
+        type="button"
+        class="pick-btn"
+        aria-label="选择显示的列"
+        title="选择显示的列"
+        onclick={() => (picking = !picking)}>⋯</button
+      >
+      {#if picking}
+        <div class="pick-shield" role="presentation" onclick={() => (picking = false)}></div>
+        <div class="pick-menu" role="menu">
+          {#each COLUMNS as c (c.key)}
+            <label
+              ><input
+                type="checkbox"
+                checked={columns.includes(c.key)}
+                onchange={() => toggleColumn(c.key)}
+              />{c.label}</label
+            >
+          {/each}
+        </div>
+      {/if}
+    </span>
   </div>
   <div
     class="viewport"
@@ -81,10 +182,15 @@
           class:hover={entry.id === hoverId}
           class:selected={selected.has(entry.id)}
           style:top="{index * ROW}px"
+          style:grid-template-columns={template}
           aria-label="{entry.isDir ? '文件夹' : '文件'} {entry.name}，{formatSize(entry.size)}"
           aria-pressed={selected.has(entry.id)}
           onmouseenter={() => onhover(entry.id)}
           onclick={(event) => activate(entry, event)}
+          oncontextmenu={(event) => {
+            event.preventDefault();
+            oncontext(entry.id, event);
+          }}
         >
           <span class="icon" aria-hidden="true">
             {#if entry.isDir}
@@ -111,15 +217,33 @@
           <span class="name">
             <span class="text">{entry.name}</span>
           </span>
-          <span class="num">{formatSize(entry.size)}</span>
-          <span class="bar" aria-hidden="true"
-            ><span
-              style:width="{Math.max(3, (entry.size / largest) * 100)}%"
-              style:background={color}
-            ></span></span
-          >
-          <span class="num muted">{formatPercent(entry.size, parentSize)}</span>
-          <span class="num muted">{entry.isDir ? entry.files.toLocaleString() : ""}</span>
+          {#each shown as c (c.key)}
+            {#if c.key === "size"}
+              <span class="num">{formatSize(entry.size)}</span>
+            {:else if c.key === "allocated"}
+              <span class="num muted">{formatSize(entry.allocated)}</span>
+            {:else if c.key === "percent"}
+              <span class="pct"
+                ><span class="bar" aria-hidden="true"
+                  ><span
+                    style:width="{Math.max(3, (entry.size / largest) * 100)}%"
+                    style:background={color}
+                  ></span></span
+                ><span class="num muted">{formatPercent(entry.size, parentSize)}</span></span
+              >
+            {:else if c.key === "files"}
+              <span class="num muted">{entry.isDir ? entry.files.toLocaleString() : ""}</span>
+            {:else if c.key === "modified"}
+              <span class="num muted">{formatDate(entry.modified)}</span>
+            {:else if c.key === "accessed"}
+              <span class="num muted">{formatDate(entry.accessed)}</span>
+            {:else if c.key === "owner"}
+              <span class="muted owner"
+                >{owners.get(entry.id) ?? (owners.has(entry.id) ? "—" : "…")}</span
+              >
+            {/if}
+          {/each}
+          <span></span>
         </button>
       {/each}
     </div>
@@ -145,10 +269,83 @@
   .head,
   .row {
     display: grid;
-    grid-template-columns: 20px minmax(0, 1fr) 72px 52px 50px 64px;
     gap: 8px;
     align-items: center;
     padding: 0 12px;
+  }
+
+  .sort {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .sort.num {
+    text-align: right;
+  }
+
+  .sort:hover {
+    color: var(--ink);
+  }
+
+  .pick {
+    position: relative;
+  }
+
+  .pick-btn {
+    width: 18px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--ink-2);
+  }
+
+  .pick-shield {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+  }
+
+  .pick-menu {
+    position: absolute;
+    top: 22px;
+    right: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 120px;
+    padding: 6px 8px;
+    border-radius: 9px;
+    background: var(--panel);
+    box-shadow: var(--shadow-lift);
+    font-weight: 400;
+  }
+
+  .pick-menu label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 2px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .pct {
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .owner {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .head {

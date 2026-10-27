@@ -8,6 +8,8 @@
     dirId: number;
     /** 数据版本；删除文件后递增，促使重新取布局。 */
     version: number;
+    /** 显示几层：1 只画直接子项，更大时在目录块里继续画它的子项。 */
+    depth: number;
     /** 当前目录子项，按 id 索引，用来取名称和大小。 */
     entries: Map<number, Entry>;
     hoverId: number | null;
@@ -19,10 +21,22 @@
     onopen: (id: number) => void;
     /** `toggle` 为 true 时（Ctrl+点按）加入或移出选择，否则只选这一项。 */
     onselect: (id: number, toggle: boolean) => void;
+    oncontext: (id: number, event: MouseEvent) => void;
   }
 
-  let { dirId, version, entries, hoverId, selected, highlight, onhover, onopen, onselect }: Props =
-    $props();
+  let {
+    dirId,
+    version,
+    depth,
+    entries,
+    hoverId,
+    selected,
+    highlight,
+    onhover,
+    onopen,
+    onselect,
+    oncontext,
+  }: Props = $props();
 
   interface Box {
     x: number;
@@ -95,6 +109,7 @@
     const w = width;
     const h = height;
     void version;
+    void depth;
     if (w < 10 || h < 10) return;
     const mine = ++request;
     const navigating = id !== shownDir;
@@ -113,7 +128,7 @@
     const timer = setTimeout(
       async () => {
         try {
-          const next = await treemap(id, w, h);
+          const next = await treemap(id, w, h, depth);
           if (mine !== request) return;
           if (focus && transition?.kind === "zoom" && transition.to === 1) {
             transition.inner = next;
@@ -212,10 +227,13 @@
     pal: Palette,
     dim: Set<number> | null,
   ) {
+    // 嵌套的块排在所属的顶层块后面，筛选时跟着顶层块一起变淡。
+    let top = -1;
     list.forEach((r, i) => {
+      if (r.level <= 1) top = r.id;
       const b = map(r);
       if (b.w < 0.5 || b.h < 0.5) return;
-      ctx.globalAlpha = alpha * (dim && !dim.has(r.id) ? 0.22 : 1);
+      ctx.globalAlpha = alpha * (dim && !dim.has(top) ? 0.22 : 1);
       const shades = pal.fill[r.category];
       ctx.fillStyle = shades[i % shades.length];
       if (tilePath(ctx, b, b.w > 6 && b.h > 6 ? 1.5 : 0.5)) ctx.fill();
@@ -294,10 +312,17 @@
     const family = getComputedStyle(container).fontFamily;
     for (const rect of rects) {
       const r = fit(rect);
-      const entry = entries.get(rect.id);
+      const entry = rect.level === 1 ? entries.get(rect.id) : undefined;
       if (!entry || r.w < 52 || r.h < 24) continue;
       if (highlight && !highlight.has(rect.id)) continue;
       ctx.fillStyle = pal.ink;
+      // 嵌套显示时，目录块顶部的名称栏里放名称和大小，下面是它的子项。
+      if (nestedIn(rect)) {
+        ctx.font = `600 11px ${family}`;
+        const label = `${entry.name}  ${formatSize(entry.size)}`;
+        ctx.fillText(ellipsize(ctx, label, r.w - 10), r.x + 5, r.y + 4);
+        continue;
+      }
       ctx.font = `600 12px ${family}`;
       ctx.fillText(ellipsize(ctx, entry.name, r.w - 16), r.x + 8, r.y + 7);
       if (r.h > 40) {
@@ -320,12 +345,18 @@
     }
   }
 
+  /** 这个目录块里是否画了子项（与 Rust 侧的 NEST_MIN 一致）。 */
+  function nestedIn(r: TreemapRect) {
+    return depth > 1 && r.isDir && r.w >= 48 && r.h >= 48;
+  }
+
+  /** 鼠标下最里层的块：子块排在父块后面，所以从后往前找。 */
   function hit(event: MouseEvent): TreemapRect | undefined {
     if (transition) return undefined;
     const box = canvas.getBoundingClientRect();
     const x = event.clientX - box.left;
     const y = event.clientY - box.top;
-    return rects.find((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+    return rects.findLast((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
   }
 
   function onmove(event: MouseEvent) {
@@ -337,9 +368,15 @@
     const r = hit(event);
     if (!r) return;
     const toggle = event.ctrlKey || event.metaKey;
-    const entry = entries.get(r.id);
-    if (!toggle && entry?.isDir && entry.hasChildren) onopen(r.id);
+    // 画出来的目录大小都不为 0，一定有子项，可以进入。
+    if (!toggle && r.isDir) onopen(r.id);
     else onselect(r.id, toggle);
+  }
+
+  function oncontextmenu(event: MouseEvent) {
+    event.preventDefault();
+    const r = hit(event);
+    if (r) oncontext(r.id, event);
   }
 </script>
 
@@ -351,6 +388,7 @@
     onmousemove={onmove}
     onmouseleave={() => onhover(null)}
     {onclick}
+    {oncontextmenu}
   ></canvas>
   {#if error}
     <p class="note error" role="alert">{error}</p>

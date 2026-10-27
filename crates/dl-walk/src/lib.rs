@@ -104,12 +104,24 @@ enum Item {
     Dir {
         name: String,
         id: usize,
+        times: (u32, u32),
     },
     File {
         name: String,
         size: u64,
         allocated: u64,
+        times: (u32, u32),
     },
+}
+
+/// 修改时间和访问时间（Unix 秒，取不到时为 0）。Windows 上目录项自带，不需要额外的系统调用。
+fn times(meta: &Metadata) -> (u32, u32) {
+    let secs = |t: io::Result<std::time::SystemTime>| {
+        t.ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| u32::try_from(d.as_secs()).unwrap_or(u32::MAX))
+    };
+    (secs(meta.modified()), secs(meta.accessed()))
 }
 
 /// 一个待读的目录：编号、路径、所属顶层项目在 [`Live`] 里的下标（根目录本身为 `None`）。
@@ -177,7 +189,12 @@ fn run(
                                     if meta.is_symlink() && is_directory(&meta) {
                                         // 链接目录：记下名称，不进入。
                                         let child = next_id.fetch_add(1, Ordering::Relaxed);
-                                        items.push(Item::Dir { name, id: child });
+                                        let times = times(&meta);
+                                        items.push(Item::Dir {
+                                            name,
+                                            id: child,
+                                            times,
+                                        });
                                     } else if meta.is_dir() {
                                         let child = next_id.fetch_add(1, Ordering::Relaxed);
                                         // 根目录下的文件夹各自成为一个顶层项目，更深的沿用父目录的。
@@ -191,7 +208,12 @@ fn run(
                                             })),
                                             _ => top,
                                         };
-                                        items.push(Item::Dir { name, id: child });
+                                        let times = times(&meta);
+                                        items.push(Item::Dir {
+                                            name,
+                                            id: child,
+                                            times,
+                                        });
                                         subdirs.push((child, entry.path(), child_top));
                                     } else {
                                         let size = meta.len();
@@ -217,6 +239,7 @@ fn run(
                                             name,
                                             size,
                                             allocated,
+                                            times: times(&meta),
                                         });
                                     }
                                     let n = seen.fetch_add(1, Ordering::Relaxed) + 1;
@@ -253,7 +276,9 @@ fn run(
     if cancelled.into_inner() {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "扫描已取消"));
     }
-    let tree = assemble(root, next_id.into_inner(), listings);
+    let mut tree = assemble(root, next_id.into_inner(), listings);
+    let (m, a) = times(&meta);
+    tree.set_times(tree.root(), m, a);
     progress(seen.into_inner());
     Ok(WalkResult {
         tree,
@@ -297,16 +322,19 @@ fn assemble(root: &Path, dirs: usize, listings: Vec<(usize, Vec<Item>)>) -> File
     while let Some((id, node)) = pending.pop_front() {
         for item in by_id[id].take().unwrap_or_default() {
             match item {
-                Item::Dir { name, id } => {
+                Item::Dir { name, id, times } => {
                     let child = tree.add_dir(node, &name);
+                    tree.set_times(child, times.0, times.1);
                     pending.push_back((id, child));
                 }
                 Item::File {
                     name,
                     size,
                     allocated,
+                    times,
                 } => {
-                    tree.add_file(node, &name, size, allocated);
+                    let child = tree.add_file(node, &name, size, allocated);
+                    tree.set_times(child, times.0, times.1);
                 }
             }
         }
@@ -486,6 +514,20 @@ mod tests {
         let top = tree.children_by_size(tree.root());
         assert_eq!(tree.name(top[0]), "a");
         assert_eq!(tree.size(top[0]), 1_250);
+
+        // 刚写的文件，修改时间就是现在。
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u32;
+        let file = tree.child_by_name(tree.root(), "top.txt").unwrap();
+        assert!(
+            now.abs_diff(tree.modified(file)) < 600,
+            "{}",
+            tree.modified(file)
+        );
+        assert!(tree.accessed(file) > 0);
+        assert!(tree.modified(top[0]) > 0, "folders have times too");
     }
 
     #[test]

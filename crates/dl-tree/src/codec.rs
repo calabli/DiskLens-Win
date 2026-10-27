@@ -3,7 +3,8 @@
 //! 格式（全部小端）：`DLTR`、版本 u32、节点数 n u32、名称池字节数 u32，
 //! 然后依次是各列：parent、first_child、next_sibling（u32 × n）、kind（u8 × n）、
 //! size、allocated（u64 × n）、files、name_start（u32 × n）、name_len（u16 × n）、名称池，
-//! 版本 2 起最后是键列：有无键 u8，有键时再跟 u64 × n。
+//! 版本 2 起是键列：有无键 u8，有键时再跟 u64 × n；
+//! 版本 3 起最后是时间列：有无时间 u8，有时间时再跟修改时间、访问时间（u32 × n 各一列）。
 //!
 //! 读取时检查所有索引都在范围内，并从根出发走一遍：每个子节点的 parent 必须指回所在目录，
 //! 且只能被访问一次。走不到的节点（已摘除的）把链接清空。这样损坏的数据不会造成越界或死循环。
@@ -13,7 +14,7 @@ use std::io::{self, Read, Write};
 use super::{FileTree, NONE, NodeId, NodeKind};
 
 const MAGIC: &[u8; 4] = b"DLTR";
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, format!("文件树数据损坏：{msg}"))
@@ -90,7 +91,10 @@ impl FileTree {
             .try_for_each(|x| w.write_all(&x.to_le_bytes()))?;
         w.write_all(self.names.as_bytes())?;
         w.write_all(&[u8::from(self.has_keys())])?;
-        write_u64s(w, &self.keys)
+        write_u64s(w, &self.keys)?;
+        w.write_all(&[u8::from(self.has_times())])?;
+        write_u32s(w, &self.modified)?;
+        write_u32s(w, &self.accessed)
     }
 
     /// 从 `r` 读回 [`write_to`](Self::write_to) 写出的树。数据不完整或不一致时返回
@@ -143,6 +147,14 @@ impl FileTree {
         } else {
             Vec::new()
         };
+        let (modified, accessed) = if version >= 3 && {
+            r.read_exact(&mut flag)?;
+            flag[0] == 1
+        } {
+            (read_u32s(r, n)?, read_u32s(r, n)?)
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
         let mut tree = Self {
             parent,
@@ -156,6 +168,8 @@ impl FileTree {
             name_len,
             names,
             keys,
+            modified,
+            accessed,
             finalized: true,
         };
         tree.validate()?;
@@ -306,9 +320,15 @@ mod tests {
         let a = t.child_by_name(0, "资料").unwrap();
         let newer = t.insert(0, "新", NodeKind::Dir, 0, 0);
         assert!(t.move_to(a, newer));
+        t.set_times(a, 1_600_000_000, 1_650_000_000);
         let back = roundtrip(&t);
         assert_eq!(describe(&back), describe(&t));
         assert_eq!(back.key(a), Some(100 + u64::from(a)));
+        assert_eq!(
+            (back.modified(a), back.accessed(a)),
+            (1_600_000_000, 1_650_000_000)
+        );
+        assert_eq!(back.modified(newer), 0);
         assert_eq!(back.key(newer), None);
         assert_eq!(back.path(a), r"D:\新\资料");
     }

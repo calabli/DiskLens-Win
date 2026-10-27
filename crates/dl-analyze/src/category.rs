@@ -42,6 +42,26 @@ impl Category {
         }
     }
 
+    /// 按标识、中文名称或常用别名找到类别（不区分大小写），用于搜索语法 `type:`。
+    pub fn from_name(name: &str) -> Option<Category> {
+        let n = name.to_lowercase();
+        if let Some(c) = Category::ALL
+            .into_iter()
+            .find(|c| c.key() == n || c.label() == n)
+        {
+            return Some(c);
+        }
+        Some(match n.as_str() {
+            "系统" | "sys" => Category::System,
+            "应用" | "程序" | "exe" => Category::App,
+            "开发" | "缓存" => Category::Dev,
+            "视频" | "音频" | "video" | "audio" | "music" | "音乐" => Category::Media,
+            "安装包" | "镜像" | "压缩包" | "archive" | "zip" | "iso" => Category::Package,
+            "文档" | "图片" | "照片" | "doc" | "image" | "photo" => Category::Document,
+            _ => return None,
+        })
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Category::System => "系统文件",
