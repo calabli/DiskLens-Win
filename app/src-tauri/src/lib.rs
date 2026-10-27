@@ -4,6 +4,7 @@ mod commands;
 mod dupes;
 mod findings;
 mod refresh;
+mod rules;
 mod scan;
 mod similar;
 mod volumes;
@@ -28,6 +29,9 @@ pub fn run() {
             cleanup::plan_delete,
             cleanup::delete_items,
             cleanup::link_items,
+            rules::clean_suggestions,
+            rules::plan_clean,
+            rules::clean_rules,
             dupes::find_duplicates,
             dupes::cancel_duplicates,
             findings::find_issues,

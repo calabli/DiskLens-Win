@@ -1,4 +1,4 @@
-//! 删除和硬链接替换：先给出汇总和拦截原因供确认，确认后执行，并同步更新树。
+//! 删除、按规则清理和硬链接替换：先给出汇总和拦截原因供确认，确认后执行，并同步更新树。
 
 use std::sync::OnceLock;
 
@@ -64,29 +64,39 @@ pub struct DeleteResult {
 pub fn plan_delete(ids: Vec<NodeId>, state: State<'_, AppState>) -> Result<DeletePlan, String> {
     let scan = state.current()?;
     let t = scan.read();
-    let mut items = Vec::new();
-    for id in dedup(ids) {
+    let ids = dedup(ids);
+    for &id in &ids {
         check(&t, id)?;
-        let path = t.path(id);
-        items.push(PlanItem {
-            id,
-            name: t.name(id).to_owned(),
-            blocked: protector().check(path.as_ref()),
-            path,
-            size: t.size(id),
-            files: t.file_count(id),
-            is_dir: t.kind(id) == NodeKind::Dir,
-        });
     }
+    Ok(make_plan(&t, &ids, &[]))
+}
+
+/// 汇总 `ids`；`allowed` 是清理规则放行的位置（见 [`Protector::check_allowing`]）。
+pub(crate) fn make_plan(t: &dl_tree::FileTree, ids: &[NodeId], allowed: &[String]) -> DeletePlan {
+    let items: Vec<PlanItem> = ids
+        .iter()
+        .map(|&id| {
+            let path = t.path(id);
+            PlanItem {
+                id,
+                name: t.name(id).to_owned(),
+                blocked: protector().check_allowing(path.as_ref(), allowed),
+                path,
+                size: t.size(id),
+                files: t.file_count(id),
+                is_dir: t.kind(id) == NodeKind::Dir,
+            }
+        })
+        .collect();
     let ok = items.iter().filter(|i| i.blocked.is_none());
-    Ok(DeletePlan {
+    DeletePlan {
         total_size: ok.clone().map(|i| i.size).sum(),
         total_files: ok
             .map(|i| u64::from(if i.is_dir { i.files } else { 1 }))
             .sum(),
         items,
         log_dir: op_log().dir().to_string_lossy().into_owned(),
-    })
+    }
 }
 
 /// 执行删除。`permanent` 为 false 时移到回收站。
@@ -111,6 +121,17 @@ pub async fn delete_items(
         }
         (ids_out, targets)
     };
+    execute(scan, ids, targets, permanent, Vec::new()).await
+}
+
+/// 执行删除并把删掉的项从树上摘除。`allowed` 是清理规则放行的位置。
+pub(crate) async fn execute(
+    scan: std::sync::Arc<crate::scan::Scanned>,
+    ids: Vec<NodeId>,
+    targets: Vec<Target>,
+    permanent: bool,
+    allowed: Vec<String>,
+) -> Result<DeleteResult, String> {
     let mode = if permanent {
         Mode::Permanent
     } else {
@@ -118,7 +139,8 @@ pub async fn delete_items(
     };
 
     let (outcomes, log_error, targets) = tauri::async_runtime::spawn_blocking(move || {
-        let (outcomes, log_error) = dl_clean::run(&targets, mode, protector(), &op_log());
+        let check = |p: &std::path::Path| protector().check_allowing(p, &allowed);
+        let (outcomes, log_error) = dl_clean::run_with(&targets, mode, &check, &op_log());
         (outcomes, log_error, targets)
     })
     .await

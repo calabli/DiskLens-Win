@@ -13,6 +13,9 @@
 
   let { plan, busy, onconfirm, oncancel }: Props = $props();
 
+  /** 清单最多列出的项数（清理临时文件时可能有成千上万项）。 */
+  const MAX_LISTED = 200;
+
   let permanent = $state(false);
   let understood = $state(false);
   let primary = $state<HTMLButtonElement>();
@@ -78,11 +81,14 @@
       <p class="path">{first.path}</p>
     {:else if deletable.length > 1}
       <ul class="items">
-        {#each deletable as item (item.id)}
+        {#each deletable.slice(0, MAX_LISTED) as item (item.id)}
           <li title={item.path}>
             <span class="name">{item.name}</span><span class="size">{formatSize(item.size)}</span>
           </li>
         {/each}
+        {#if deletable.length > MAX_LISTED}
+          <li class="more">另有 {(deletable.length - MAX_LISTED).toLocaleString()} 项</li>
+        {/if}
       </ul>
     {/if}
     {#if deletable.length > 0}
@@ -224,6 +230,10 @@
     display: flex;
     gap: 12px;
     padding: 3px 6px;
+  }
+
+  .items .more {
+    color: var(--ink-2);
   }
 
   .items .name {

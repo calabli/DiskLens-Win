@@ -1,14 +1,16 @@
 [package]
 name = "dl-clean"
-description = "DiskLens 清理：受保护路径、删除到回收站、硬链接替换、操作日志"
+description = "DiskLens 清理：清理规则、受保护路径、删除到回收站、硬链接替换、操作日志"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+dl-tree.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
