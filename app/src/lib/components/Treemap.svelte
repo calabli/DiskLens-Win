@@ -22,6 +22,8 @@
     /** `toggle` 为 true 时（Ctrl+点按）加入或移出选择，否则只选这一项。 */
     onselect: (id: number, toggle: boolean) => void;
     oncontext: (id: number, event: MouseEvent) => void;
+    /** 鼠标中键：在文件管理器中打开。 */
+    onexplore: (id: number) => void;
   }
 
   let {
@@ -36,6 +38,7 @@
     onopen,
     onselect,
     oncontext,
+    onexplore,
   }: Props = $props();
 
   interface Box {
@@ -373,6 +376,13 @@
     else onselect(r.id, toggle);
   }
 
+  function onauxclick(event: MouseEvent) {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    const r = hit(event);
+    if (r) onexplore(r.id);
+  }
+
   function oncontextmenu(event: MouseEvent) {
     event.preventDefault();
     const r = hit(event);
@@ -389,6 +399,8 @@
     onmouseleave={() => onhover(null)}
     {onclick}
     {oncontextmenu}
+    {onauxclick}
+    onmousedown={(e) => e.button === 1 && e.preventDefault()}
   ></canvas>
   {#if error}
     <p class="note error" role="alert">{error}</p>

@@ -46,6 +46,8 @@
     /** 可见的行变化时通知，用来按需查询所有者。 */
     onvisible: (ids: number[]) => void;
     oncontext: (id: number, event: MouseEvent) => void;
+    /** 在文件管理器中打开（鼠标中键或行尾的按钮）。 */
+    onexplore: (id: number) => void;
   }
 
   let {
@@ -65,6 +67,7 @@
     oncolumns,
     onvisible,
     oncontext,
+    onexplore,
   }: Props = $props();
 
   let picking = $state(false);
@@ -187,6 +190,15 @@
           aria-pressed={selected.has(entry.id)}
           onmouseenter={() => onhover(entry.id)}
           onclick={(event) => activate(entry, event)}
+          onmousedown={(event) => {
+            // 中键：不要触发自动滚动。
+            if (event.button === 1) event.preventDefault();
+          }}
+          onauxclick={(event) => {
+            if (event.button !== 1) return;
+            event.preventDefault();
+            onexplore(entry.id);
+          }}
           oncontextmenu={(event) => {
             event.preventDefault();
             oncontext(entry.id, event);
@@ -243,7 +255,32 @@
               >
             {/if}
           {/each}
-          <span></span>
+          <!-- 行本身是按钮，里面不能再放按钮；键盘可用 Ctrl+Enter 或右键菜单。 -->
+          <span
+            class="explore"
+            role="presentation"
+            title={entry.isDir
+              ? "在文件管理器中打开（鼠标中键、Ctrl+Enter）"
+              : "在文件管理器中显示（鼠标中键、Ctrl+Enter）"}
+            onclick={(event) => {
+              event.stopPropagation();
+              onexplore(entry.id);
+            }}
+            ><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"
+              ><path
+                d="M1.5 4.5a1.5 1.5 0 0 1 1.5-1.5h3l1.5 1.5H13a1.5 1.5 0 0 1 1.5 1.5v5.5A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+              ></path><path
+                d="M7 9.5h4.5M9.5 7.5l2 2-2 2"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+              ></path></svg
+            ></span
+          >
         </button>
       {/each}
     </div>
@@ -340,6 +377,31 @@
     grid-template-columns: 52px 1fr;
     gap: 6px;
     align-items: center;
+  }
+
+  .explore {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    color: var(--ink-2);
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .row:hover .explore,
+  .row.selected .explore {
+    opacity: 1;
+  }
+
+  .explore:hover {
+    background: var(--hover);
+    color: var(--accent);
+  }
+
+  .row.selected .explore {
+    color: inherit;
   }
 
   .owner {

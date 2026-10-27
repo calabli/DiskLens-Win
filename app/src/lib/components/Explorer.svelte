@@ -12,6 +12,7 @@
     planClean,
     planDelete,
     revealInExplorer,
+    openInExplorer,
     type MoveResult,
     refreshScan,
     search,
@@ -565,6 +566,17 @@
     selectOnly(r.newId);
   }
 
+  /** 在文件管理器中打开：文件夹打开它本身，文件打开所在文件夹并选中它。 */
+  async function explore(id: number) {
+    ctx = null;
+    menuOpen = false;
+    try {
+      await openInExplorer(id);
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
   async function showInExplorer(id = menuTarget) {
     menuOpen = false;
     ctx = null;
@@ -613,7 +625,10 @@
       if (event.key === "Escape") dupOpen = false;
       return;
     }
-    if (event.key === "Delete") {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      explore(selectedId ?? dirId);
+    } else if (event.key === "Delete") {
       event.preventDefault();
       askDelete();
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !hits) {
@@ -1006,6 +1021,7 @@
                   }}
                   onvisible={loadOwners}
                   oncontext={(id, e) => openContext(id, e)}
+                  onexplore={explore}
                 />
               </div>
             {/key}
@@ -1103,6 +1119,7 @@
             onup={up}
             depth={panels.depth.sunburst}
             oncontext={openContext}
+            onexplore={explore}
           />
         {:else}
           <Treemap
@@ -1117,6 +1134,7 @@
             onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
             depth={panels.depth.treemap}
             oncontext={openContext}
+            onexplore={explore}
           />
         {/if}
       </section>
@@ -1180,6 +1198,9 @@
     }}
   ></div>
   <div class="menu context" role="menu" style:left="{c.x}px" style:top="{c.y}px">
+    <button type="button" role="menuitem" onclick={() => explore(c.id)}
+      >{c.isDir ? "在文件管理器中打开" : "打开所在位置"}<span class="key">中键</span></button
+    >
     {#if c.isDir}
       <button
         type="button"
@@ -1190,9 +1211,11 @@
         }}>打开</button
       >
     {/if}
-    <button type="button" role="menuitem" onclick={() => showInExplorer(c.id)}
-      >在资源管理器中显示</button
-    >
+    {#if c.isDir}
+      <button type="button" role="menuitem" onclick={() => showInExplorer(c.id)}
+        >在上级文件夹中显示</button
+      >
+    {/if}
     <button type="button" role="menuitem" onclick={() => copyPath(c.id)}>复制路径</button>
     {#if c.isDir}
       <button type="button" role="menuitem" onclick={() => askMove(c.id)}>移动到其他磁盘…</button>
@@ -1328,6 +1351,13 @@
     position: fixed;
     top: auto;
     right: auto;
+  }
+
+  .menu .key {
+    float: right;
+    margin-left: 16px;
+    opacity: 0.55;
+    font-size: 11px;
   }
 
   .menu hr {
