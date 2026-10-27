@@ -285,6 +285,32 @@ export async function thumbnailUrl(id: number, max: number): Promise<string> {
   return URL.createObjectURL(new Blob([buf], { type: "image/png" }));
 }
 
+/** 一条清理建议（一条规则在当前结果中匹配到的位置）。 */
+export interface Suggestion {
+  id: string;
+  name: string;
+  category: string;
+  risk: "low" | "medium" | "high";
+  /** 默认勾选。 */
+  default: boolean;
+  description: string;
+  effect: string;
+  /** `guide` 只给处理方法，不能直接清理。 */
+  action: "contents" | "self" | "guide";
+  guide: string | null;
+  size: number;
+  count: number;
+  locations: { id: number; path: string; size: number }[];
+}
+
+export const cleanSuggestions = () => invoke<Suggestion[]>("clean_suggestions");
+
+/** 按规则清理前的汇总，格式同删除。 */
+export const planClean = (ruleIds: string[]) => invoke<DeletePlan>("plan_clean", { ruleIds });
+
+export const cleanRules = (ruleIds: string[], permanent: boolean) =>
+  invoke<DeleteResult>("clean_rules", { ruleIds, permanent });
+
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
 

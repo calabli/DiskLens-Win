@@ -105,9 +105,20 @@ impl Protector {
 
     /// 不能删除时返回原因。
     pub fn check(&self, path: &Path) -> Option<String> {
+        self.check_allowing(path, &[])
+    }
+
+    /// 同 [`check`](Self::check)，但位于 `allowed` 中某个位置（含其本身）的路径不受“整棵子树”
+    /// 保护的限制。清理规则用它处理受保护文件夹里的特定位置，例如 `C:\Windows\Temp`。
+    /// 卷级保留项目、被保护的文件夹本身和包含受保护文件夹的上级仍然不能删除。
+    pub fn check_allowing(&self, path: &Path, allowed: &[String]) -> Option<String> {
         let Some(p) = normalize(&path.to_string_lossy()) else {
             return Some("不是完整路径".into());
         };
+        let exempt = allowed
+            .iter()
+            .filter_map(|a| normalize(a))
+            .any(|a| p == a || is_under(&p, &a));
         let (_, rest) = split_root(&p);
         if rest.is_empty() {
             return Some("不能删除整个磁盘".into());
@@ -119,7 +130,7 @@ impl Protector {
         if let Some(dir) = self
             .subtree
             .iter()
-            .find(|d| p == d.key || is_under(&p, &d.key))
+            .find(|d| !exempt && (p == d.key || is_under(&p, &d.key)))
         {
             return Some(format!("位于受保护的系统文件夹 {} 中", dir.display));
         }
@@ -257,6 +268,30 @@ mod tests {
         let p = Protector::new(&[r"D:\Keep\Inner"], &[]);
         let reason = p.check(Path::new(r"d:\keep")).unwrap();
         assert!(reason.contains(r"D:\Keep\Inner"), "{reason}");
+    }
+
+    #[test]
+    fn rules_can_open_specific_places_only() {
+        let p = protector();
+        let allow = [r"C:\WINDOWS\Temp".to_string()];
+        let ok = |path: &str| p.check_allowing(Path::new(path), &allow).is_none();
+        assert!(ok(r"C:\Windows\Temp\x.log"));
+        assert!(ok(r"C:\Windows\Temp\sub\y"));
+        assert!(!ok(r"C:\Windows\System32\x.dll"), "only the allowed place");
+        assert!(!ok(r"C:\Windows"), "not the protected folder itself");
+        assert!(
+            !ok(r"C:\Windows\TempX\y"),
+            "prefix of a name is not a match"
+        );
+        let reserved = [r"D:\$Recycle.Bin".to_string()];
+        assert!(
+            p.check_allowing(Path::new(r"D:\$Recycle.Bin\x"), &reserved)
+                .is_some()
+        );
+        assert!(
+            p.check(Path::new(r"C:\Windows\Temp\x.log")).is_some(),
+            "plain check unchanged"
+        );
     }
 
     #[test]

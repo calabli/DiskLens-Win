@@ -1,0 +1,324 @@
+# DiskLens 内置清理规则
+#
+# 每条规则说明“这是什么、删了会怎样”，并标出风险：
+#   low     删除后程序会自动重建，或只是丢失可再生的缓存
+#   medium  删除后不能撤销某些操作（例如回退系统），或要花较长时间重新下载
+#   high    不能直接删除，只给出正确的处理方法
+# 只有低风险、且 default 为 true 的规则会默认勾选。
+#
+# 匹配方式（可以组合）：
+#   paths      具体位置。可用 %环境变量%；路径中的某一级可以写 *（例如浏览器的多个配置文件）
+#   files      与 paths 配合：只匹配该目录下名称符合通配符的文件
+#   dir_names  在扫描范围内按目录名查找（不区分大小写），找到后不再往里找
+#   requires   与 dir_names 配合：同一级必须有这些文件之一（可用通配符），避免误判
+#
+# action：
+#   contents   清空匹配到的目录里的内容，目录本身保留
+#   self       删除匹配到的目录或文件本身
+#   guide      不删除，只显示 guide 里的处理方法
+
+# ---------- 系统临时文件 ----------
+
+- id: temp-user
+  name: 用户临时文件
+  category: system
+  risk: low
+  default: true
+  description: 程序运行时留下的临时文件，大多在程序退出后就没用了。
+  effect: 正在使用的文件会被跳过；个别安装程序如果正在运行，可能需要重新运行。
+  action: contents
+  paths: ['%TEMP%']
+
+- id: temp-windows
+  name: Windows 临时文件
+  category: system
+  risk: low
+  default: true
+  description: 系统和服务留下的临时文件。
+  effect: 正在使用的文件会被跳过，不影响系统运行。
+  action: contents
+  paths: ['%SystemRoot%\Temp']
+
+# ---------- 浏览器缓存 ----------
+
+- id: browser-chrome
+  name: Chrome 缓存
+  category: browser
+  risk: low
+  default: true
+  description: Chrome 为加快打开网页而保存的图片、脚本等副本。
+  effect: 网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。建议先关闭 Chrome。
+  action: contents
+  paths:
+    - '%LOCALAPPDATA%\Google\Chrome\User Data\*\Cache'
+    - '%LOCALAPPDATA%\Google\Chrome\User Data\*\Code Cache'
+    - '%LOCALAPPDATA%\Google\Chrome\User Data\*\GPUCache'
+
+- id: browser-edge
+  name: Edge 缓存
+  category: browser
+  risk: low
+  default: true
+  description: Microsoft Edge 为加快打开网页而保存的图片、脚本等副本。
+  effect: 网页第一次打开会稍慢，登录状态、收藏夹和历史记录不受影响。建议先关闭 Edge。
+  action: contents
+  paths:
+    - '%LOCALAPPDATA%\Microsoft\Edge\User Data\*\Cache'
+    - '%LOCALAPPDATA%\Microsoft\Edge\User Data\*\Code Cache'
+    - '%LOCALAPPDATA%\Microsoft\Edge\User Data\*\GPUCache'
+
+- id: browser-firefox
+  name: Firefox 缓存
+  category: browser
+  risk: low
+  default: true
+  description: Firefox 为加快打开网页而保存的副本。
+  effect: 网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。建议先关闭 Firefox。
+  action: contents
+  paths: ['%LOCALAPPDATA%\Mozilla\Firefox\Profiles\*\cache2']
+
+# ---------- 更新缓存 ----------
+
+- id: update-download
+  name: Windows 更新下载缓存
+  category: update
+  risk: low
+  default: true
+  description: Windows 更新下载的安装包，更新安装完成后就不再需要。
+  effect: 如果有更新正在下载或等待安装，可能需要重新下载。
+  action: contents
+  paths: ['%SystemRoot%\SoftwareDistribution\Download']
+
+- id: delivery-optimization
+  name: 传递优化文件
+  category: update
+  risk: low
+  default: true
+  description: 为了把更新分享给局域网内其他电脑而保留的更新文件。
+  effect: 不影响本机已经安装的更新。
+  action: contents
+  paths:
+    - '%SystemRoot%\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache'
+
+# ---------- 日志与转储 ----------
+
+- id: crash-dumps
+  name: 崩溃转储
+  category: logs
+  risk: low
+  default: true
+  description: 程序或系统崩溃时保存的内存快照，只在排查故障时有用。
+  effect: 无法再把这些崩溃报告发给开发者分析。
+  action: contents
+  paths:
+    - '%LOCALAPPDATA%\CrashDumps'
+    - '%SystemRoot%\Minidump'
+
+- id: memory-dump
+  name: 系统内存转储
+  category: logs
+  risk: low
+  default: true
+  description: 系统蓝屏时保存的完整内存快照，通常很大。
+  effect: 无法再用它分析上一次蓝屏的原因。
+  action: self
+  paths: ['%SystemRoot%\MEMORY.DMP']
+
+- id: error-reports
+  name: Windows 错误报告
+  category: logs
+  risk: low
+  default: true
+  description: 程序出错时生成、等待发送或已经发送的错误报告。
+  effect: 不影响任何程序运行。
+  action: contents
+  paths:
+    - '%ProgramData%\Microsoft\Windows\WER\ReportArchive'
+    - '%ProgramData%\Microsoft\Windows\WER\ReportQueue'
+    - '%LOCALAPPDATA%\Microsoft\Windows\WER\ReportArchive'
+    - '%LOCALAPPDATA%\Microsoft\Windows\WER\ReportQueue'
+
+- id: thumbnail-cache
+  name: 缩略图缓存
+  category: system
+  risk: low
+  default: false
+  description: 资源管理器为图片和视频生成的缩略图。
+  effect: 打开图片多的文件夹时，缩略图需要重新生成，会慢一会儿。请先关闭资源管理器窗口。
+  action: self
+  paths: ['%LOCALAPPDATA%\Microsoft\Windows\Explorer']
+  files: ['thumbcache_*.db']
+
+# ---------- 需要通过系统处理的大项 ----------
+
+- id: windows-old
+  name: 旧系统备份（Windows.old）
+  category: system
+  risk: medium
+  default: false
+  description: 升级 Windows 时保留的上一个系统，用来回退。
+  effect: 删除后无法回退到以前的 Windows 版本。
+  action: guide
+  guide: 打开“设置 → 系统 → 存储 → 临时文件”，勾选“以前的 Windows 安装”后点“删除文件”。系统会正确处理其中的权限。
+  paths: ['%SystemDrive%\Windows.old']
+
+- id: component-store
+  name: 组件存储（WinSxS）
+  category: system
+  risk: medium
+  default: false
+  description: Windows 组件和更新的备份。显示的大小包含大量硬链接，实际可释放的通常远小于此。
+  effect: 清理后无法卸载已经安装的更新。
+  action: guide
+  guide: 以管理员身份打开终端，运行 Dism.exe /Online /Cleanup-Image /StartComponentCleanup。不要手动删除其中的文件。
+  paths: ['%SystemRoot%\WinSxS']
+
+- id: hibernation-file
+  name: 休眠文件
+  category: system
+  risk: high
+  default: false
+  description: 休眠时用来保存内存内容的文件，大小接近内存容量。
+  effect: 关闭休眠后无法使用休眠和“快速启动”。
+  action: guide
+  guide: 如果不用休眠，以管理员身份打开终端运行 powercfg /h off，系统会自动删除这个文件。需要时用 powercfg /h on 恢复。
+  paths: ['%SystemDrive%\hiberfil.sys']
+
+- id: page-file
+  name: 分页文件
+  category: system
+  risk: high
+  default: false
+  description: 内存不足时系统用来暂存数据的文件。
+  effect: 分页文件过小可能导致程序崩溃或系统不稳定。
+  action: guide
+  guide: 在“系统属性 → 高级 → 性能设置 → 高级 → 虚拟内存”中调整，或把它移到其他磁盘。不要直接删除。
+  paths: ['%SystemDrive%\pagefile.sys']
+
+# ---------- 开发者缓存 ----------
+
+- id: node-modules
+  name: node_modules
+  category: dev
+  risk: low
+  default: false
+  description: Node.js 项目安装的依赖包。
+  effect: 再次运行项目前需要执行 npm install（或 pnpm / yarn install）重新安装。
+  action: self
+  dir_names: [node_modules]
+  requires: [package.json]
+
+- id: rust-target
+  name: Rust 编译输出（target）
+  category: dev
+  risk: low
+  default: false
+  description: Cargo 编译生成的中间文件和程序。
+  effect: 下次编译需要从头开始，耗时较长。
+  action: self
+  dir_names: [target]
+  requires: [Cargo.toml]
+
+- id: dotnet-obj-bin
+  name: .NET 编译输出（obj、bin）
+  category: dev
+  risk: low
+  default: false
+  description: Visual Studio 编译 .NET 项目生成的中间文件和程序。
+  effect: 下次编译需要重新生成；如果直接从 bin 目录运行程序，需要先重新编译。
+  action: self
+  dir_names: [obj, bin]
+  requires: ['*.csproj', '*.vbproj', '*.fsproj']
+
+- id: gradle-cache
+  name: Gradle 缓存
+  category: dev
+  risk: low
+  default: false
+  description: Gradle 下载的依赖和构建缓存。
+  effect: 下次构建时会重新下载依赖。
+  action: contents
+  paths: ['%USERPROFILE%\.gradle\caches']
+
+- id: maven-repository
+  name: Maven 本地仓库
+  category: dev
+  risk: low
+  default: false
+  description: Maven 下载的依赖包。
+  effect: 下次构建时会重新下载依赖；只存在于本地、没有发布到远程仓库的包会丢失。
+  action: contents
+  paths: ['%USERPROFILE%\.m2\repository']
+
+- id: package-caches
+  name: npm / Yarn / pip 下载缓存
+  category: dev
+  risk: low
+  default: false
+  description: 包管理器下载过的安装包副本，用来加快下次安装。
+  effect: 下次安装同样的包时需要重新下载。
+  action: contents
+  paths:
+    - '%LOCALAPPDATA%\npm-cache'
+    - '%LOCALAPPDATA%\Yarn\Cache'
+    - '%LOCALAPPDATA%\pip\cache'
+
+- id: conda-pkgs
+  name: Conda 安装包缓存
+  category: dev
+  risk: low
+  default: false
+  description: Conda 下载并解压过的安装包。
+  effect: 已经创建的环境不受影响；以后安装同样的包需要重新下载。也可以运行 conda clean --all。
+  action: contents
+  paths:
+    - '%USERPROFILE%\.conda\pkgs'
+    - '%USERPROFILE%\anaconda3\pkgs'
+    - '%USERPROFILE%\miniconda3\pkgs'
+
+- id: cargo-registry-cache
+  name: Cargo 下载缓存
+  category: dev
+  risk: low
+  default: false
+  description: Cargo 下载的 crate 压缩包。
+  effect: 下次编译需要的 crate 会重新下载。
+  action: contents
+  paths:
+    - '%CARGO_HOME%\registry\cache'
+    - '%USERPROFILE%\.cargo\registry\cache'
+
+- id: huggingface-cache
+  name: Hugging Face 模型缓存
+  category: dev
+  risk: medium
+  default: false
+  description: 下载过的 AI 模型和数据集，通常很大。
+  effect: 下次使用这些模型时需要重新下载，可能要很久。
+  action: contents
+  paths: ['%USERPROFILE%\.cache\huggingface\hub']
+
+- id: ollama-models
+  name: Ollama 模型
+  category: dev
+  risk: medium
+  default: false
+  description: Ollama 下载的本地大模型。
+  effect: 删除后需要重新下载才能使用。
+  action: guide
+  guide: 运行 ollama list 查看模型，再用 ollama rm 模型名 删除不需要的。直接删除文件会让 Ollama 的记录不一致。
+  paths: ['%USERPROFILE%\.ollama\models']
+
+- id: virtual-disks
+  name: WSL / Docker 虚拟磁盘
+  category: dev
+  risk: high
+  default: false
+  description: WSL 和 Docker 的虚拟磁盘只会变大不会自动变小，里面删掉的文件仍然占着空间。
+  effect: 直接删除会丢失其中的所有 Linux 系统和容器数据。
+  action: guide
+  guide: 先运行 wsl --shutdown，再以管理员身份在 PowerShell 中运行 Optimize-VHD -Path 虚拟磁盘路径 -Mode Full（需要 Hyper-V 组件），或用 diskpart 的 compact vdisk 压缩。Docker Desktop 也可以在设置中“Clean / Purge data”。
+  paths:
+    - '%LOCALAPPDATA%\Packages\*\LocalState'
+    - '%LOCALAPPDATA%\Docker\wsl\*'
+  files: ['*.vhdx']

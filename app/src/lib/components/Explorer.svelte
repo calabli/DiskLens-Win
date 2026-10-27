@@ -3,10 +3,12 @@
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import {
+    cleanRules,
     deleteItems,
     linkItems,
     listChildren,
     nodeInfo,
+    planClean,
     planDelete,
     refreshScan,
     search,
@@ -26,6 +28,7 @@
   import Duplicates from "./Duplicates.svelte";
   import Findings from "./Findings.svelte";
   import Similar from "./Similar.svelte";
+  import Suggestions from "./Suggestions.svelte";
   import SearchResults from "./SearchResults.svelte";
   import Sunburst from "./Sunburst.svelte";
   import Toast from "./Toast.svelte";
@@ -86,12 +89,14 @@
   /** 删除之后扫描范围的最新汇总（状态栏用）。 */
   let rootInfo = $state<NodeInfo | null>(null);
   let plan = $state<DeletePlan | null>(null);
+  /** 确认后按规则清理（这些规则 id），而不是按项目删除。 */
+  let planRules = $state<string[] | null>(null);
   let deleting = $state(false);
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
   let refreshing = $state(false);
   /** 正在用整理工具（占据主区域）。 */
   let dupOpen = $state(false);
-  let toolTab = $state<"dupes" | "similar" | "findings">("dupes");
+  let toolTab = $state<"suggest" | "dupes" | "similar" | "findings">("suggest");
   /** 本次打开后删除过的项目，用来从重复文件结果里去掉。 */
   let removed = $state(new Set<number>());
   /** 最近一次增量刷新的结果，显示在状态栏。 */
@@ -276,9 +281,26 @@
   }
 
   /** 选中项先给出删除汇总，确认后再删。 */
+  /** 按规则清理：先给出汇总，确认后执行。 */
+  async function askClean(ruleIds: string[]) {
+    if (ruleIds.length === 0 || plan) return;
+    try {
+      const p = await planClean(ruleIds);
+      if (p.items.length === 0) {
+        toast = { message: "所选项目里已经没有可以清理的内容", detail: [], tone: "info" };
+        return;
+      }
+      planRules = ruleIds;
+      plan = p;
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
   async function askDelete(ids: number[] = selection) {
     if (ids.length === 0 || plan) return;
     try {
+      planRules = null;
       plan = await planDelete(ids);
     } catch (e) {
       toast = { message: String(e), detail: [], tone: "warn" };
@@ -290,15 +312,19 @@
     const ids = plan.items.filter((i) => !i.blocked).map((i) => i.id);
     deleting = true;
     try {
-      const result = await deleteItems(ids, permanent);
+      const result = planRules
+        ? await cleanRules(planRules, permanent)
+        : await deleteItems(ids, permanent);
       const done = result.deleted.length;
       const verb = permanent ? "已彻底删除" : "已移到回收站";
+      // 清理临时文件时常有大量正在使用的文件删不掉，只列出前几个。
+      const failed = result.failed.slice(0, 5).map((f) => `${f.path}：${f.reason}`);
+      if (result.failed.length > 5) {
+        failed.push(`另有 ${result.failed.length - 5} 项没能删除，可能正被程序使用`);
+      }
       toast = {
         message: done > 0 ? `${verb}，释放 ${formatSize(result.freed)}` : "没有删除任何项目",
-        detail: [
-          ...result.failed.map((f) => `${f.path}：${f.reason}`),
-          ...(result.logError ? [result.logError] : []),
-        ],
+        detail: [...failed, ...(result.logError ? [result.logError] : [])],
         tone: result.failed.length > 0 || result.logError ? "warn" : "info",
       };
       if (done > 0) {
@@ -316,6 +342,7 @@
     } finally {
       deleting = false;
       plan = null;
+      planRules = null;
     }
   }
 
@@ -531,7 +558,7 @@
       onclick={() => (dupOpen = !dupOpen)}
       aria-pressed={dupOpen}
       aria-label="整理工具"
-      title="整理工具：在当前文件夹中查找重复文件、相似图片、空文件夹和失效链接"
+      title="整理工具：清理建议，以及在当前文件夹中查找重复文件、相似图片、空文件夹和失效链接"
       ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
         ><rect
           x="2"
@@ -651,6 +678,12 @@
           <button
             type="button"
             role="tab"
+            aria-selected={toolTab === "suggest"}
+            onclick={() => (toolTab = "suggest")}>清理建议</button
+          >
+          <button
+            type="button"
+            role="tab"
             aria-selected={toolTab === "dupes"}
             onclick={() => (toolTab = "dupes")}>重复文件</button
           >
@@ -667,7 +700,15 @@
             onclick={() => (toolTab = "findings")}>空文件夹与失效链接</button
           >
         </div>
-        <!-- 两个页面都保持挂载，切换时不丢结果。 -->
+        <!-- 各页面都保持挂载，切换时不丢结果。 -->
+        <div class="tool-page" hidden={toolTab !== "suggest"}>
+          <Suggestions
+            {version}
+            onclean={askClean}
+            onreveal={revealNode}
+            onclose={() => (dupOpen = false)}
+          />
+        </div>
         <div class="tool-page" hidden={toolTab !== "dupes"}>
           <Duplicates
             rootId={dirId}
