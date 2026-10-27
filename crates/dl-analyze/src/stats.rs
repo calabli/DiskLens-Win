@@ -316,7 +316,10 @@ mod tests {
         let media = t.child_by_name(0, "media").unwrap();
         let iso = t.child_by_name(0, "Win11.iso").unwrap();
         let q = Query::parse("ext:png").unwrap();
-        assert_eq!(search_marks(&t, 0, &q, &[proj, nm, media, iso]), [1, 1, 0, 0]);
+        assert_eq!(
+            search_marks(&t, 0, &q, &[proj, nm, media, iso]),
+            [1, 1, 0, 0]
+        );
         let logo = t.child_by_name(proj, "logo.png").unwrap();
         assert_eq!(search_marks(&t, proj, &q, &[nm, logo, proj]), [1, 2, 0]);
         let q = Query::parse("folder: media").unwrap();

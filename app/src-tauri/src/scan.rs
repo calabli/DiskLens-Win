@@ -73,11 +73,44 @@ pub struct ScanSummary {
     pub file_count: u32,
     pub node_count: usize,
     pub skipped: u64,
+    /// 读不了的文件夹（最多记 [`dl_walk::MAX_UNREADABLE`] 个）。
+    pub unreadable: Vec<UnreadableDir>,
     pub elapsed_ms: u64,
     /// 扫描完成的时间（Unix 毫秒）。
     pub scanned_at: u64,
     /// 是否是从缓存读回的上次结果。
     pub from_cache: bool,
+}
+
+/// 一个读不了的文件夹和原因，界面上单独列出。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadableDir {
+    pub path: String,
+    pub reason: String,
+}
+
+impl UnreadableDir {
+    fn new(u: &dl_walk::Unreadable) -> Self {
+        Self {
+            path: u.path.to_string_lossy().into_owned(),
+            reason: reason(u.kind, u.code),
+        }
+    }
+}
+
+/// 把读目录失败的错误说成一句话。
+fn reason(kind: std::io::ErrorKind, code: Option<i32>) -> String {
+    use std::io::ErrorKind;
+    match (code, kind) {
+        (Some(5), _) | (None, ErrorKind::PermissionDenied) => "没有访问权限".into(),
+        (Some(32), _) => "正被其他程序占用".into(),
+        (Some(2 | 3), _) | (None, ErrorKind::NotFound) => "扫描时已经不存在".into(),
+        (Some(21), _) => "设备未就绪".into(),
+        (Some(1920), _) => "系统无法访问".into(),
+        (Some(c), _) => format!("系统错误 {c}"),
+        (None, k) => k.to_string(),
+    }
 }
 
 /// 一次完成的扫描。删除文件后树会被修改，所以放在读写锁里。
@@ -275,7 +308,7 @@ fn run_scan(
             .map(|(pos, _)| pos);
         match dl_ntfs::scan_volume(letter, report) {
             Ok(scan) => {
-                let scanned = finish(path, ScanMode::Mft, None, scan.tree, 0, started);
+                let scanned = finish(path, ScanMode::Mft, None, scan.tree, 0, Vec::new(), started);
                 *scanned.journal.lock().expect("journal poisoned") = journal;
                 return Ok(scanned);
             }
@@ -301,6 +334,7 @@ fn run_scan(
         fallback_reason,
         result.tree,
         result.skipped,
+        result.unreadable.iter().map(UnreadableDir::new).collect(),
         started,
     ))
 }
@@ -332,6 +366,7 @@ fn finish(
     fallback_reason: Option<String>,
     tree: FileTree,
     skipped: u64,
+    unreadable: Vec<UnreadableDir>,
     started: Instant,
 ) -> Scanned {
     let summary = ScanSummary {
@@ -344,6 +379,7 @@ fn finish(
         file_count: 0,
         node_count: 0,
         skipped,
+        unreadable,
         elapsed_ms: started.elapsed().as_millis() as u64,
         scanned_at: crate::cache::now_ms(),
         from_cache: false,
