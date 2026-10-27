@@ -107,7 +107,7 @@ pub async fn move_folder(
     })
 }
 
-/// 打开资源管理器并选中这一项。
+/// 打开资源管理器并选中这一项（在它所在的文件夹里）。
 #[tauri::command]
 pub fn reveal_in_explorer(id: NodeId, state: State<'_, AppState>) -> Result<(), String> {
     let scan = state.current()?;
@@ -116,7 +116,19 @@ pub fn reveal_in_explorer(id: NodeId, state: State<'_, AppState>) -> Result<(), 
         check(&t, id)?;
         t.path(id)
     };
-    open_explorer(&path).map_err(|e| format!("无法打开资源管理器：{e}"))
+    open_explorer(&path, true).map_err(|e| format!("无法打开资源管理器：{e}"))
+}
+
+/// 在资源管理器中打开：文件夹打开它本身，文件打开所在文件夹并选中它。
+#[tauri::command]
+pub fn open_in_explorer(id: NodeId, state: State<'_, AppState>) -> Result<(), String> {
+    let scan = state.current()?;
+    let (path, is_dir) = {
+        let t = scan.read();
+        check(&t, id)?;
+        (t.path(id), t.kind(id) == NodeKind::Dir)
+    };
+    open_explorer(&path, !is_dir).map_err(|e| format!("无法打开资源管理器：{e}"))
 }
 
 /// 各项目的所有者（“域\用户名”或用户名）；查不到的为 `None`。逐个读安全描述符，
@@ -204,16 +216,21 @@ fn owner_of(_: &str) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn open_explorer(path: &str) -> std::io::Result<()> {
+fn open_explorer(path: &str, select: bool) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     // explorer 自己解析参数，路径要整个放在引号里。
+    let arg = if select {
+        format!("/select,\"{path}\"")
+    } else {
+        format!("\"{path}\"")
+    };
     std::process::Command::new("explorer.exe")
-        .raw_arg(format!("/select,\"{path}\""))
+        .raw_arg(arg)
         .spawn()
         .map(|_| ())
 }
 
 #[cfg(not(windows))]
-fn open_explorer(_: &str) -> std::io::Result<()> {
+fn open_explorer(_: &str, _: bool) -> std::io::Result<()> {
     Err(std::io::Error::other("只在 Windows 上支持"))
 }

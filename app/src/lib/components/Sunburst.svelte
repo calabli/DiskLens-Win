@@ -25,6 +25,8 @@
     /** 点按圆心：返回上一级。 */
     onup: () => void;
     oncontext: (id: number, event: MouseEvent) => void;
+    /** 鼠标中键：在文件管理器中打开。 */
+    onexplore: (id: number) => void;
   }
 
   let {
@@ -41,6 +43,7 @@
     onselect,
     onup,
     oncontext,
+    onexplore,
   }: Props = $props();
   /** 圆心空洞占半径的比例。 */
   const HOLE = 0.26;
@@ -367,6 +370,13 @@
       onhover(null);
     }}
     {onclick}
+    onmousedown={(e) => e.button === 1 && e.preventDefault()}
+    onauxclick={(event) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      const h = hit(event);
+      if (h && h !== "center") onexplore(h.id);
+    }}
     oncontextmenu={(event) => {
       event.preventDefault();
       const h = hit(event);

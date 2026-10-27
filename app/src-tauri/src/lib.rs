@@ -33,6 +33,7 @@ pub fn run() {
             cleanup::link_items,
             files::move_folder,
             files::reveal_in_explorer,
+            files::open_in_explorer,
             files::owners,
             rules::clean_suggestions,
             rules::plan_clean,

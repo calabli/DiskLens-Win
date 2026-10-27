@@ -344,6 +344,9 @@ export function moveFolder(
 
 export const revealInExplorer = (id: number) => invoke<void>("reveal_in_explorer", { id });
 
+/** 在资源管理器中打开：文件夹打开它本身，文件打开所在文件夹并选中它。 */
+export const openInExplorer = (id: number) => invoke<void>("open_in_explorer", { id });
+
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
 
