@@ -79,14 +79,14 @@ fn run(scan: Arc<Scanned>, letter: char) -> Refresh {
     let changes = usn::fold(&records);
 
     // 先查好文件大小，再拿写锁，尽量缩短界面被阻塞的时间。
-    let sizes: Vec<Option<(u64, u64)>> = match FileSizer::open(letter) {
+    let sizes: Vec<Option<usn::Facts>> = match FileSizer::open(letter) {
         Ok(sizer) => changes
             .iter()
             .map(|c| (!c.deleted && !c.is_dir()).then(|| sizer.size(c)).flatten())
             .collect(),
         Err(_) => vec![None; changes.len()],
     };
-    let size_at: std::collections::HashMap<u64, (u64, u64)> = changes
+    let size_at: std::collections::HashMap<u64, usn::Facts> = changes
         .iter()
         .zip(&sizes)
         .filter_map(|(c, s)| s.map(|s| (c.frn, s)))

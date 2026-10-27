@@ -44,6 +44,8 @@ pub struct UsnRecord {
     pub frn: u64,
     pub parent: u64,
     pub usn: i64,
+    /// 记录产生的时间（Unix 秒）。
+    pub time: u32,
     pub reason: u32,
     pub attributes: u32,
     pub name: String,
@@ -78,6 +80,7 @@ pub fn parse_records(buf: &[u8]) -> Result<Vec<UsnRecord>> {
                 frn: le_u64(rec, 8)?,
                 parent: le_u64(rec, 16)?,
                 usn: le_u64(rec, 24)? as i64,
+                time: crate::record::filetime_to_unix(le_u64(rec, 32)?),
                 reason: le_u32(rec, 40)?,
                 attributes: le_u32(rec, 52)?,
                 name: String::from_utf16_lossy(&units),
@@ -97,6 +100,8 @@ pub struct Change {
     pub parent: u64,
     pub name: String,
     pub attributes: u32,
+    /// 最后一条记录的时间（Unix 秒）。
+    pub time: u32,
     /// 这段日志里新建过（或记录被复用给了另一个文件）：原有的节点作废。
     pub created: bool,
     /// 最后被删除了。
@@ -125,6 +130,7 @@ pub fn fold(records: &[UsnRecord]) -> Vec<Change> {
                 parent: r.parent,
                 name: r.name.clone(),
                 attributes: r.attributes,
+                time: r.time,
                 created: false,
                 deleted: false,
             });
@@ -140,6 +146,7 @@ pub fn fold(records: &[UsnRecord]) -> Vec<Change> {
         if r.reason & REASON_FILE_DELETE != 0 {
             c.deleted = true;
         }
+        c.time = r.time;
         // 只带旧名称的那条记录不更新名称和位置。
         let old_name_only =
             r.reason & REASON_RENAME_OLD_NAME != 0 && r.reason & REASON_RENAME_NEW_NAME == 0;
@@ -207,6 +214,16 @@ impl NodeIndex {
     }
 }
 
+/// 文件当前的情况，按文件 id 现查得到。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Facts {
+    pub size: u64,
+    pub allocated: u64,
+    /// 修改时间、访问时间（Unix 秒）。
+    pub modified: u32,
+    pub accessed: u32,
+}
+
 /// [`apply`] 做了什么。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ApplyStats {
@@ -217,13 +234,13 @@ pub struct ApplyStats {
     pub skipped: u64,
 }
 
-/// 把变化应用到树上。`size_of` 返回文件当前的（逻辑大小，占用空间），查不到时返回 `None`
+/// 把变化应用到树上。`size_of` 返回文件当前的大小和时间，查不到时返回 `None`
 /// （保留原值，新文件记为 0）。
 pub fn apply(
     tree: &mut FileTree,
     index: &mut NodeIndex,
     changes: &[Change],
-    size_of: impl FnMut(&Change) -> Option<(u64, u64)>,
+    size_of: impl FnMut(&Change) -> Option<Facts>,
 ) -> ApplyStats {
     let mut a = Applier {
         tree,
@@ -273,7 +290,7 @@ struct Applier<'a, F> {
     stats: ApplyStats,
 }
 
-impl<F: FnMut(&Change) -> Option<(u64, u64)>> Applier<'_, F> {
+impl<F: FnMut(&Change) -> Option<Facts>> Applier<'_, F> {
     /// 确保第 `i` 个变化已应用，返回它对应的节点。
     fn ensure(&mut self, i: usize) -> Option<NodeId> {
         let c = &self.changes[i];
@@ -338,10 +355,19 @@ impl<F: FnMut(&Change) -> Option<(u64, u64)>> Applier<'_, F> {
                 id
             }
         };
-        if kind == NodeKind::File
-            && let Some((size, allocated)) = (self.size_of)(c)
-        {
-            self.tree.set_file_size(id, size, allocated);
+        let facts = if kind == NodeKind::File {
+            (self.size_of)(c)
+        } else {
+            None
+        };
+        match facts {
+            Some(f) => {
+                self.tree.set_file_size(id, f.size, f.allocated);
+                self.tree.set_times(id, f.modified, f.accessed);
+            }
+            // 目录（或查不到的文件）用日志记录的时间。
+            None if c.time > 0 => self.tree.set_times(id, c.time, c.time),
+            None => {}
         }
         Some(id)
     }
@@ -360,10 +386,10 @@ mod win {
 
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_COMPRESSION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_DESCRIPTOR,
+        FILE_BASIC_INFO, FILE_COMPRESSION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_DESCRIPTOR,
         FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-        FILE_STANDARD_INFO, FileCompressionInfo, FileIdType, FileStandardInfo, GetDiskFreeSpaceW,
-        GetFileInformationByHandleEx, OpenFileById,
+        FILE_STANDARD_INFO, FileBasicInfo, FileCompressionInfo, FileIdType, FileStandardInfo,
+        GetDiskFreeSpaceW, GetFileInformationByHandleEx, OpenFileById,
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::{
@@ -371,8 +397,9 @@ mod win {
     };
 
     use super::{
-        ATTRIBUTE_COMPRESSED, ATTRIBUTE_SPARSE, Change, JournalPos, UsnRecord, parse_records,
+        ATTRIBUTE_COMPRESSED, ATTRIBUTE_SPARSE, Change, Facts, JournalPos, UsnRecord, parse_records,
     };
+    use crate::record::filetime_to_unix;
     use crate::{Error, Result, le_u64};
 
     /// 一次读取日志的缓冲区大小。
@@ -507,7 +534,7 @@ mod win {
         ///
         /// 与 MFT 扫描的口径一致：常驻在 MFT 记录里的小文件占用记 0；压缩和稀疏文件按实际
         /// 分配的空间计。
-        pub fn size(&self, change: &Change) -> Option<(u64, u64)> {
+        pub fn size(&self, change: &Change) -> Option<Facts> {
             let mut id = FILE_ID_DESCRIPTOR {
                 dwSize: size_of::<FILE_ID_DESCRIPTOR>() as u32,
                 Type: FileIdType,
@@ -565,7 +592,28 @@ mod win {
                 // 不是整簇，说明内容常驻在 MFT 记录里，不另占簇。
                 allocated = 0;
             }
-            Some((size, allocated))
+            let mut basic = FILE_BASIC_INFO::default();
+            // SAFETY: 同上，缓冲区是一个 FILE_BASIC_INFO。
+            let ok = unsafe {
+                GetFileInformationByHandleEx(
+                    file.as_raw_handle(),
+                    FileBasicInfo,
+                    (&raw mut basic).cast(),
+                    size_of::<FILE_BASIC_INFO>() as u32,
+                )
+            };
+            let time = |t: i64| filetime_to_unix(t.max(0) as u64);
+            let (modified, accessed) = if ok != 0 {
+                (time(basic.LastWriteTime), time(basic.LastAccessTime))
+            } else {
+                (change.time, change.time)
+            };
+            Some(Facts {
+                size,
+                allocated,
+                modified,
+                accessed,
+            })
         }
     }
 }
@@ -581,6 +629,7 @@ mod tests {
             frn,
             parent,
             usn: 0,
+            time: 1_700_000_000,
             reason,
             attributes: if dir { ATTRIBUTE_DIRECTORY } else { 0x20 },
             name: name.into(),
@@ -614,10 +663,16 @@ mod tests {
     fn run(t: &mut FileTree, index: &mut NodeIndex, records: &[UsnRecord]) -> ApplyStats {
         let changes = fold(records);
         apply(t, index, &changes, |c| {
-            Some(match c.name.as_str() {
+            let (size, allocated) = match c.name.as_str() {
                 "new.bin" => (5_000, 8_192),
                 "b.txt" => (250, 4_096),
                 _ => (1, 0),
+            };
+            Some(Facts {
+                size,
+                allocated,
+                modified: 1_800_000_000,
+                accessed: 1_800_000_001,
             })
         })
     }
@@ -713,6 +768,11 @@ mod tests {
             ]
         );
         assert_eq!(t.file_count(0), 2);
+        // 文件用现查的时间，新建的目录用日志记录的时间。
+        let new_dir = t.child_by_name(0, "新目录").unwrap();
+        let new_file = t.child_by_name(new_dir, "new.bin").unwrap();
+        assert_eq!(t.modified(new_file), 1_800_000_000);
+        assert_eq!(t.modified(new_dir), 1_700_000_000);
         assert_eq!(
             stats,
             ApplyStats {

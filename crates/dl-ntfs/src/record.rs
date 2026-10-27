@@ -6,6 +6,7 @@
 use crate::runs::{Run, allocated_clusters, parse_runs};
 use crate::{Error, Result, le_u16, le_u32, le_u64};
 
+pub const ATTR_STANDARD_INFORMATION: u32 = 0x10;
 pub const ATTR_ATTRIBUTE_LIST: u32 = 0x20;
 pub const ATTR_FILE_NAME: u32 = 0x30;
 pub const ATTR_DATA: u32 = 0x80;
@@ -52,6 +53,16 @@ pub struct Record {
     pub streams: Vec<DataStream>,
     /// 属性分散在多条记录里。其他记录都会被顺序扫到，只有 `$MFT` 自身需要关心。
     pub has_attribute_list: bool,
+    /// `$STANDARD_INFORMATION` 里的修改时间和访问时间（Unix 秒，0 表示没有或早于 1970 年）。
+    pub modified: u32,
+    pub accessed: u32,
+}
+
+/// Windows FILETIME（1601 年起的 100 纳秒）换算成 Unix 秒；超出 u32 范围的取边界。
+pub fn filetime_to_unix(ft: u64) -> u32 {
+    const EPOCH_DIFF: u64 = 11_644_473_600;
+    let secs = ft / 10_000_000;
+    u32::try_from(secs.saturating_sub(EPOCH_DIFF)).unwrap_or(u32::MAX)
 }
 
 /// 还原 update sequence。记录损坏（撕裂写入）时返回错误。
@@ -109,6 +120,12 @@ pub fn parse_record(rec: &mut [u8], want_runs: bool) -> Result<Option<Record>> {
         match ty {
             ATTR_ATTRIBUTE_LIST => out.has_attribute_list = true,
             ATTR_FILE_NAME => out.names.push(parse_file_name(attr)?),
+            ATTR_STANDARD_INFORMATION => {
+                // 依次是创建、修改、MFT 变更、访问时间，各 8 字节。
+                let v = resident_value(attr)?;
+                out.modified = filetime_to_unix(le_u64(v, 0x08)?);
+                out.accessed = filetime_to_unix(le_u64(v, 0x18)?);
+            }
             ATTR_DATA => out.streams.push(parse_data(attr, want_runs)?),
             _ => {}
         }
@@ -305,11 +322,17 @@ mod tests {
 
     #[test]
     fn parses_names_and_streams() {
+        // 2024-01-02 03:04:05 UTC 和 2025-06-07 08:09:10 UTC。
+        let ft = |unix: u64| (unix + 11_644_473_600) * 10_000_000;
+        let mut si = vec![0u8; 0x48];
+        si[0x08..0x10].copy_from_slice(&ft(1_704_164_645).to_le_bytes());
+        si[0x18..0x20].copy_from_slice(&ft(1_749_283_750).to_le_bytes());
         let mut rec = record(
             42,
             IN_USE,
             0,
             &[
+                resident(ATTR_STANDARD_INFORMATION, None, &si),
                 file_name(5, "PROGRA~1", NAMESPACE_DOS),
                 file_name(5, "报告 2026.docx", 1),
                 resident(ATTR_DATA, None, b"hello"),
@@ -326,6 +349,8 @@ mod tests {
         let r = parse_record(&mut rec, false).unwrap().unwrap();
         assert!(!r.is_dir);
         assert_eq!(r.base, 0);
+        assert_eq!((r.modified, r.accessed), (1_704_164_645, 1_749_283_750));
+        assert_eq!(filetime_to_unix(0), 0, "before 1970");
         assert_eq!(r.names.len(), 2);
         assert_eq!(
             r.names[1],

@@ -78,6 +78,9 @@ export interface Entry {
   isDir: boolean;
   hasChildren: boolean;
   category: CategoryKey;
+  /** 修改时间、访问时间（Unix 秒，0 表示未知）。 */
+  modified: number;
+  accessed: number;
 }
 
 export interface ChildList {
@@ -94,6 +97,9 @@ export interface TypeStat {
 }
 
 export interface SearchHit {
+  /** 修改时间、访问时间（Unix 秒，0 表示未知）。 */
+  modified: number;
+  accessed: number;
   id: number;
   name: string;
   path: string;
@@ -106,6 +112,9 @@ export interface SearchHit {
 export interface TreemapRect {
   id: number;
   category: CategoryKey;
+  /** 层级：直接子项为 1，嵌套在里面的依次加 1。 */
+  level: number;
+  isDir: boolean;
   x: number;
   y: number;
   w: number;
@@ -343,10 +352,33 @@ export const openCached = (root: string) => invoke<ScanSummary>("open_cached", {
 
 export const nodeInfo = (id: number) => invoke<NodeInfo>("node_info", { id });
 
-export const listChildren = (id: number, filter: string | null) =>
-  invoke<ChildList>("list_children", { id, filter });
+/** 各项目的所有者（只用于界面上看得见的行）；查不到的为 `null`。 */
+export const owners = (ids: number[]) => invoke<(string | null)[]>("owners", { ids });
+
+export const listChildren = (
+  id: number,
+  filter: string | null,
+  sort = "size",
+  desc: boolean | null = null,
+) => invoke<ChildList>("list_children", { id, filter, sort, desc });
 
 export const typeStats = (id: number) => invoke<TypeStat[]>("type_stats", { id });
+
+export interface BucketStat {
+  label: string;
+  /** 搜索语法，点按后列出这一组的文件；时间未知的一组没有。 */
+  query: string | null;
+  size: number;
+  files: number;
+}
+
+export interface BucketStats {
+  age: BucketStat[];
+  size: BucketStat[];
+}
+
+/** 子树中的文件按修改时间、按大小的分布。 */
+export const bucketStats = (id: number) => invoke<BucketStats>("bucket_stats", { id });
 
 export const search = (id: number, query: string, limit: number) =>
   invoke<SearchHit[]>("search", { id, query, limit });
@@ -368,8 +400,8 @@ export interface SunburstSegment {
  */
 const SEGMENT_BYTES = 20;
 
-export async function sunburst(id: number): Promise<SunburstSegment[]> {
-  const buf = await invoke<ArrayBuffer>("sunburst", { id });
+export async function sunburst(id: number, depth = 5): Promise<SunburstSegment[]> {
+  const buf = await invoke<ArrayBuffer>("sunburst", { id, depth });
   const view = new DataView(buf);
   const segments: SunburstSegment[] = [];
   for (let off = 0; off + SEGMENT_BYTES <= buf.byteLength; off += SEGMENT_BYTES) {
@@ -386,17 +418,28 @@ export async function sunburst(id: number): Promise<SunburstSegment[]> {
   return segments;
 }
 
-/** 每块 24 字节：id u32、类型下标 u32、x/y/w/h f32，小端。见 Rust 侧 `commands::treemap`。 */
+/**
+ * 每块 24 字节：id u32、标志 u32（低 8 位类型下标，8–15 位层级，第 16 位表示目录）、x/y/w/h f32，
+ * 小端。见 Rust 侧 `commands::treemap`。
+ */
 const RECT_BYTES = 24;
 
-export async function treemap(id: number, width: number, height: number): Promise<TreemapRect[]> {
-  const buf = await invoke<ArrayBuffer>("treemap", { id, width, height });
+export async function treemap(
+  id: number,
+  width: number,
+  height: number,
+  depth = 1,
+): Promise<TreemapRect[]> {
+  const buf = await invoke<ArrayBuffer>("treemap", { id, width, height, depth });
   const view = new DataView(buf);
   const rects: TreemapRect[] = [];
   for (let off = 0; off + RECT_BYTES <= buf.byteLength; off += RECT_BYTES) {
+    const flags = view.getUint32(off + 4, true);
     rects.push({
       id: view.getUint32(off, true),
-      category: CATEGORY_KEYS[view.getUint32(off + 4, true)] ?? "other",
+      category: CATEGORY_KEYS[flags & 0xff] ?? "other",
+      level: (flags >> 8) & 0xff,
+      isDir: (flags & 0x10000) !== 0,
       x: view.getFloat32(off + 8, true),
       y: view.getFloat32(off + 12, true),
       w: view.getFloat32(off + 16, true),

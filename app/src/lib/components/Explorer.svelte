@@ -7,6 +7,7 @@
     deleteItems,
     linkItems,
     listChildren,
+    owners as fetchOwners,
     nodeInfo,
     planClean,
     planDelete,
@@ -15,6 +16,8 @@
     refreshScan,
     search,
     typeStats,
+    bucketStats,
+    type BucketStats,
     type ChildList,
     type DeletePlan,
     type LinkGroup,
@@ -25,11 +28,18 @@
     type TypeStat,
   } from "$lib/api";
   import { formatAgo, formatPercent, formatSize } from "$lib/format";
-  import ChildListView from "./ChildList.svelte";
+  import { SvelteMap } from "svelte/reactivity";
+  import ChildListView, {
+    COLUMNS,
+    DEFAULT_COLUMNS,
+    type ColumnKey,
+    type SortKey,
+  } from "./ChildList.svelte";
   import ConfirmDelete from "./ConfirmDelete.svelte";
   import Duplicates from "./Duplicates.svelte";
   import Findings from "./Findings.svelte";
   import MoveDialog from "./MoveDialog.svelte";
+  import Rankings from "./Rankings.svelte";
   import Similar from "./Similar.svelte";
   import Suggestions from "./Suggestions.svelte";
   import SearchResults from "./SearchResults.svelte";
@@ -52,16 +62,40 @@
   type ChartKind = "treemap" | "sunburst";
 
   /** 读取上次的侧栏展开状态和图表类型；存储不可用时用默认值。 */
-  function loadPanels(): { list: boolean; side: boolean; chart: ChartKind } {
+  interface Panels {
+    list: boolean;
+    side: boolean;
+    chart: ChartKind;
+    columns: ColumnKey[];
+    sort: { key: SortKey; desc: boolean };
+    /** 树图显示几层、旭日图画几圈。 */
+    depth: { treemap: number; sunburst: number };
+  }
+
+  function loadPanels(): Panels {
+    const defaults: Panels = {
+      list: true,
+      side: true,
+      chart: "treemap",
+      columns: DEFAULT_COLUMNS,
+      sort: { key: "size", desc: true },
+      depth: { treemap: 1, sunburst: 5 },
+    };
     try {
       const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}");
       return {
         list: saved.list !== false,
         side: saved.side !== false,
         chart: saved.chart === "sunburst" ? "sunburst" : "treemap",
+        columns: Array.isArray(saved.columns) ? saved.columns : defaults.columns,
+        sort: saved.sort?.key ? saved.sort : defaults.sort,
+        depth: {
+          treemap: [1, 2, 3].includes(saved.depth?.treemap) ? saved.depth.treemap : 1,
+          sunburst: [3, 5, 7].includes(saved.depth?.sunburst) ? saved.depth.sunburst : 5,
+        },
       };
     } catch {
-      return { list: true, side: true, chart: "treemap" };
+      return defaults;
     }
   }
 
@@ -76,6 +110,7 @@
   let all = $state<ChildList>({ total: 0, entries: [] });
   let filtered = $state<ChildList | null>(null);
   let stats = $state<TypeStat[]>([]);
+  let buckets = $state<BucketStats | null>(null);
   let hoverId = $state<number | null>(null);
   /** 选中的项目，按选中顺序；最后一项是焦点。 */
   let selection = $state<number[]>([]);
@@ -102,7 +137,7 @@
   let moving = $state<{ id: number; name: string; path: string; size: number } | null>(null);
   /** 正在用整理工具（占据主区域）。 */
   let dupOpen = $state(false);
-  let toolTab = $state<"suggest" | "dupes" | "similar" | "findings">("suggest");
+  let toolTab = $state<"suggest" | "rank" | "dupes" | "similar" | "findings">("suggest");
   /** 本次打开后删除过的项目，用来从重复文件结果里去掉。 */
   let removed = $state(new Set<number>());
   /** 最近一次增量刷新的结果，显示在状态栏。 */
@@ -145,10 +180,12 @@
     const id = dirId;
     void version;
     const mine = ++loadSeq;
-    Promise.all([nodeInfo(id), listChildren(id, null), typeStats(id)])
-      .then(([i, l, s]) => {
+    const { key, desc } = panels.sort;
+    Promise.all([nodeInfo(id), listChildren(id, null, key, desc), typeStats(id), bucketStats(id)])
+      .then(([i, l, s, b]) => {
         if (mine !== loadSeq) return;
         info = i;
+        buckets = b;
         all = l;
         stats = s;
         error = "";
@@ -179,7 +216,7 @@
       return;
     }
     const timer = setTimeout(() => {
-      listChildren(id, text)
+      listChildren(id, text, panels.sort.key, panels.sort.desc)
         .then((l) => {
           if (mine !== filterSeq) return;
           filtered = l;
@@ -200,6 +237,34 @@
       // 存不下也不影响使用。
     }
   });
+
+  /** 已查到的所有者；只查界面上看得见的行。 */
+  const ownerCache = new SvelteMap<number, string | null>();
+
+  function loadOwners(ids: number[]) {
+    const missing = ids.filter((id) => !ownerCache.has(id));
+    if (missing.length === 0) return;
+    fetchOwners(missing)
+      .then((names) => missing.forEach((id, i) => ownerCache.set(id, names[i])))
+      .catch(() => missing.forEach((id) => ownerCache.set(id, null)));
+  }
+
+  /** 点列头排序：同一列再点一次反向；名称默认升序，其他默认降序。 */
+  function sortBy(key: SortKey) {
+    panels.sort =
+      panels.sort.key === key ? { key, desc: !panels.sort.desc } : { key, desc: key !== "name" };
+  }
+
+  /**
+   * 列表面板的宽度：名称列留 160px，加上每个显示的列和列间距，再加上图标列、
+   * 选列按钮和左右边距（共 90px）。
+   */
+  const listWidth = $derived(
+    250 +
+      COLUMNS.filter((c) => panels.columns.includes(c.key))
+        .map((c) => parseInt(c.width) + 8)
+        .reduce((a, b) => a + b, 0),
+  );
 
   /** 选中 `id`；`only` 只选它，`toggle` 加选或取消，`range` 从起点连续选到它。 */
   function select(id: number, mode: SelectMode) {
@@ -264,6 +329,23 @@
     forward = forward.slice(0, -1);
     back = [...back, dirId];
     go(next, 1, false);
+  }
+
+  /** 从统计面板点选：设好筛选条件；`deep` 时直接在所有子文件夹中查找。 */
+  function applyFilter(query: string, deep: boolean) {
+    filter = query;
+    hits = null;
+    if (deep && query) runSearch(query);
+  }
+
+  async function runSearch(text: string) {
+    try {
+      hits = await search(dirId, text, SEARCH_LIMIT);
+      searchedFor = text;
+      filterError = "";
+    } catch (e) {
+      filterError = String(e);
+    }
   }
 
   async function searchSubtree(event: SubmitEvent) {
@@ -430,11 +512,38 @@
   const menuTarget = $derived(selection.length === 1 ? selection[0] : dirId);
   const menuEntry = $derived(selection.length === 1 ? entries.get(selection[0]) : undefined);
 
-  async function askMove() {
+  /** 右键菜单：对象和弹出位置。 */
+  let ctx = $state<{ id: number; isDir: boolean; x: number; y: number } | null>(null);
+
+  async function openContext(id: number, event: MouseEvent) {
+    if (!selected.has(id)) selectOnly(id);
+    const entry = entries.get(id);
+    let isDir = entry?.isDir ?? false;
+    if (!entry) {
+      try {
+        isDir = (await nodeInfo(id)).isDir;
+      } catch {
+        return;
+      }
+    }
+    // 不要超出窗口。
+    const x = Math.min(event.clientX, window.innerWidth - 200);
+    const y = Math.min(event.clientY, window.innerHeight - 200);
+    ctx = { id, isDir, x, y };
+  }
+
+  function contextDelete(id: number) {
+    ctx = null;
+    askDelete(selection.includes(id) && selection.length > 1 ? selection : [id]);
+  }
+
+  async function askMove(id = menuEntry?.isDir ? menuEntry.id : undefined) {
     menuOpen = false;
-    if (!menuEntry?.isDir) return;
+    ctx = null;
+    if (id == null) return;
     try {
-      const n = await nodeInfo(menuEntry.id);
+      const n = await nodeInfo(id);
+      if (!n.isDir) return;
       moving = { id: n.id, name: n.name, path: n.path, size: n.size };
     } catch (e) {
       toast = { message: String(e), detail: [], tone: "warn" };
@@ -456,19 +565,21 @@
     selectOnly(r.newId);
   }
 
-  async function showInExplorer() {
+  async function showInExplorer(id = menuTarget) {
     menuOpen = false;
+    ctx = null;
     try {
-      await revealInExplorer(menuTarget);
+      await revealInExplorer(id);
     } catch (e) {
       toast = { message: String(e), detail: [], tone: "warn" };
     }
   }
 
-  async function copyPath() {
+  async function copyPath(id = menuTarget) {
     menuOpen = false;
+    ctx = null;
     try {
-      const { path } = await nodeInfo(menuTarget);
+      const { path } = await nodeInfo(id);
       await navigator.clipboard.writeText(path);
       toast = { message: "已复制路径", detail: [path], tone: "info" };
     } catch (e) {
@@ -493,8 +604,9 @@
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
     if (["INPUT", "SELECT"].includes(target.tagName) || plan || moving) return;
-    if (menuOpen && event.key === "Escape") {
+    if ((menuOpen || ctx) && event.key === "Escape") {
       menuOpen = false;
+      ctx = null;
       return;
     }
     if (dupOpen) {
@@ -704,10 +816,12 @@
             role="menuitem"
             disabled={!menuEntry?.isDir}
             title={menuEntry?.isDir ? "" : "先选中一个文件夹"}
-            onclick={askMove}>移动到其他磁盘…</button
+            onclick={() => askMove()}>移动到其他磁盘…</button
           >
-          <button type="button" role="menuitem" onclick={showInExplorer}>在资源管理器中显示</button>
-          <button type="button" role="menuitem" onclick={copyPath}>复制路径</button>
+          <button type="button" role="menuitem" onclick={() => showInExplorer()}
+            >在资源管理器中显示</button
+          >
+          <button type="button" role="menuitem" onclick={() => copyPath()}>复制路径</button>
         </div>
       {/if}
     </div>
@@ -765,7 +879,7 @@
     <p class="banner" role="status">{message}</p>
   {/each}
 
-  <div class="body">
+  <div class="body" style:--list-w="{listWidth}px">
     {#if dupOpen}
       <div class="tools">
         <div class="tool-tabs" role="tablist" aria-label="整理工具">
@@ -774,6 +888,12 @@
             role="tab"
             aria-selected={toolTab === "suggest"}
             onclick={() => (toolTab = "suggest")}>清理建议</button
+          >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={toolTab === "rank"}
+            onclick={() => (toolTab = "rank")}>排行</button
           >
           <button
             type="button"
@@ -802,6 +922,18 @@
             onreveal={revealNode}
             onclose={() => (dupOpen = false)}
           />
+        </div>
+        <div class="tool-page" hidden={toolTab !== "rank"}>
+          {#if toolTab === "rank"}
+            <Rankings
+              rootId={dirId}
+              rootName={title}
+              {removed}
+              ondelete={(ids) => askDelete(ids)}
+              onreveal={revealNode}
+              onclose={() => (dupOpen = false)}
+            />
+          {/if}
         </div>
         <div class="tool-page" hidden={toolTab !== "dupes"}>
           <Duplicates
@@ -862,9 +994,18 @@
                   {hoverId}
                   {selected}
                   focusId={selectedId}
+                  columns={panels.columns}
+                  sort={panels.sort}
+                  owners={ownerCache}
                   onhover={(id) => (hoverId = id)}
                   onopen={open}
                   onselect={select}
+                  onsort={sortBy}
+                  oncolumns={(c) => {
+                    panels.columns = c;
+                  }}
+                  onvisible={loadOwners}
+                  oncontext={(id, e) => openContext(id, e)}
                 />
               </div>
             {/key}
@@ -891,6 +1032,22 @@
                 : "点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选"}</span
             >
           {/if}
+          <select
+            class="depth"
+            aria-label={panels.chart === "sunburst" ? "旭日图圈数" : "树图层级"}
+            title={panels.chart === "sunburst" ? "旭日图圈数" : "树图显示几层"}
+            value={panels.chart === "sunburst" ? panels.depth.sunburst : panels.depth.treemap}
+            onchange={(e) => {
+              const v = Number((e.currentTarget as HTMLSelectElement).value);
+              if (!v) return;
+              if (panels.chart === "sunburst") panels.depth.sunburst = v;
+              else panels.depth.treemap = v;
+            }}
+          >
+            {#each panels.chart === "sunburst" ? [3, 5, 7] : [1, 2, 3] as n (n)}
+              <option value={n}>{panels.chart === "sunburst" ? `${n} 圈` : `${n} 层`}</option>
+            {/each}
+          </select>
           <div class="chart-switch" role="radiogroup" aria-label="图表类型">
             <button
               type="button"
@@ -944,6 +1101,8 @@
             onopen={open}
             onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
             onup={up}
+            depth={panels.depth.sunburst}
+            oncontext={openContext}
           />
         {:else}
           <Treemap
@@ -956,13 +1115,15 @@
             onhover={(id) => (hoverId = id)}
             onopen={open}
             onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+            depth={panels.depth.treemap}
+            oncontext={openContext}
           />
         {/if}
       </section>
 
       <div class="fold side-fold" class:collapsed={!panels.side} inert={!panels.side}>
         <aside class="side">
-          <TypeStats {stats} />
+          <TypeStats {stats} {buckets} {filter} onfilter={applyFilter} />
         </aside>
       </div>
     {/if}
@@ -1005,6 +1166,44 @@
     onconfirm={confirmDelete}
     oncancel={() => !deleting && (plan = null)}
   />
+{/if}
+
+{#if ctx}
+  {@const c = ctx}
+  <div
+    class="menu-shield"
+    role="presentation"
+    onclick={() => (ctx = null)}
+    oncontextmenu={(e) => {
+      e.preventDefault();
+      ctx = null;
+    }}
+  ></div>
+  <div class="menu context" role="menu" style:left="{c.x}px" style:top="{c.y}px">
+    {#if c.isDir}
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => {
+          ctx = null;
+          open(c.id);
+        }}>打开</button
+      >
+    {/if}
+    <button type="button" role="menuitem" onclick={() => showInExplorer(c.id)}
+      >在资源管理器中显示</button
+    >
+    <button type="button" role="menuitem" onclick={() => copyPath(c.id)}>复制路径</button>
+    {#if c.isDir}
+      <button type="button" role="menuitem" onclick={() => askMove(c.id)}>移动到其他磁盘…</button>
+    {/if}
+    <hr />
+    <button type="button" role="menuitem" class="danger" onclick={() => contextDelete(c.id)}
+      >{selection.includes(c.id) && selection.length > 1
+        ? `删除选中的 ${selection.length} 项…`
+        : "删除…"}</button
+    >
+  </div>
 {/if}
 
 {#if moving}
@@ -1123,6 +1322,40 @@
 
   .menu button:disabled {
     opacity: 0.4;
+  }
+
+  .menu.context {
+    position: fixed;
+    top: auto;
+    right: auto;
+  }
+
+  .menu hr {
+    width: 100%;
+    margin: 4px 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .menu .danger {
+    color: var(--danger);
+  }
+
+  .menu .danger:hover {
+    background: var(--danger);
+    color: #fff;
+  }
+
+  .depth {
+    height: 22px;
+    margin-left: auto;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--field);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 12px;
   }
 
   .tools {
@@ -1357,7 +1590,6 @@
     display: flex;
     flex: none;
     gap: 2px;
-    margin-left: auto;
     padding: 2px;
     border-radius: 7px;
     background: var(--field);

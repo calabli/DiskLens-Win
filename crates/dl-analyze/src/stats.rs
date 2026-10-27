@@ -6,7 +6,7 @@ use std::collections::{BinaryHeap, HashMap};
 use dl_tree::{FileTree, NodeId, NodeKind};
 
 use crate::category::{Category, classify, is_dev_dir};
-use crate::query::Query;
+use crate::query::{Item, Query};
 
 const N: usize = Category::ALL.len();
 
@@ -119,6 +119,53 @@ fn collect_dominant(
     totals
 }
 
+/// 一组文件的合计。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Bucket {
+    pub size: u64,
+    pub files: u64,
+}
+
+/// 按修改时间和按大小分组的统计（只算文件）。分界与搜索语法一致，见 [`AGE_LIMITS`]、[`SIZE_LIMITS`]。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Buckets {
+    /// 一周内、一个月内、一年内、更早、时间未知。
+    pub age: [Bucket; 5],
+    /// 1 GB 以上、100 MB–1 GB、1–100 MB、1 MB 以下。
+    pub size: [Bucket; 4],
+}
+
+/// 按修改时间分组的分界：7 天、30 天、365 天（与 `dm:>7d`、`dm:>1m`、`dm:>1y` 一致）。
+pub const AGE_LIMITS: [u64; 3] = [7 * 86_400, 30 * 86_400, 365 * 86_400];
+/// 按大小分组的分界（从大到小）。
+pub const SIZE_LIMITS: [u64; 3] = [1 << 30, 100 << 20, 1 << 20];
+
+/// 统计 `id` 子树中的文件按修改时间和大小的分布。`now` 为当前时间（Unix 秒）。
+pub fn buckets(tree: &FileTree, id: NodeId, now: u64) -> Buckets {
+    let mut out = Buckets::default();
+    let mut stack = vec![id];
+    while let Some(n) = stack.pop() {
+        if tree.kind(n) == NodeKind::Dir {
+            stack.extend(tree.children(n));
+            continue;
+        }
+        let size = tree.size(n);
+        let modified = u64::from(tree.modified(n));
+        let age = if modified == 0 {
+            4
+        } else {
+            let since = now.saturating_sub(modified);
+            AGE_LIMITS.iter().position(|&l| since < l).unwrap_or(3)
+        };
+        let by_size = SIZE_LIMITS.iter().position(|&l| size >= l).unwrap_or(3);
+        for b in [&mut out.age[age], &mut out.size[by_size]] {
+            b.size += size;
+            b.files += 1;
+        }
+    }
+    out
+}
+
 /// `id` 自己或它的某个祖先是否是开发缓存目录。根目录名（盘符或路径）不算。
 fn ancestors_in_dev_dir(tree: &FileTree, id: NodeId) -> bool {
     let mut cur = Some(id);
@@ -159,17 +206,28 @@ pub fn search(tree: &FileTree, id: NodeId, query: &Query, limit: usize) -> Vec<N
     }
     // 小顶堆保留当前最大的 limit 个。
     let mut heap: BinaryHeap<Reverse<(u64, NodeId)>> = BinaryHeap::with_capacity(limit + 1);
-    let mut stack: Vec<NodeId> = tree.children(id).collect();
-    while let Some(n) = stack.pop() {
+    let root_dev = ancestors_in_dev_dir(tree, id);
+    let mut stack: Vec<(NodeId, bool)> = tree.children(id).map(|c| (c, root_dev)).collect();
+    while let Some((n, in_dev)) = stack.pop() {
         let is_dir = tree.kind(n) == NodeKind::Dir;
         if is_dir {
-            stack.extend(tree.children(n));
+            let dev = in_dev || is_dev_dir(tree.name(n));
+            stack.extend(tree.children(n).map(|c| (c, dev)));
         }
         let size = tree.size(n);
         if heap.len() == limit && heap.peek().is_some_and(|Reverse((s, _))| *s >= size) {
             continue;
         }
-        if query.matches(tree.name(n), is_dir, size) {
+        let item = Item {
+            name: tree.name(n),
+            is_dir,
+            size,
+            modified: tree.modified(n),
+            accessed: tree.accessed(n),
+            // 文件按名称归类；目录的类别要统计整棵子树，搜索时不算。
+            category: (!is_dir).then(|| classify(tree.name(n), in_dev)),
+        };
+        if query.matches(&item) {
             heap.push(Reverse((size, n)));
             if heap.len() > limit {
                 heap.pop();
@@ -197,6 +255,30 @@ mod tests {
         t.add_file(0, "Win11.iso", 7_000, 8_192);
         t.finalize();
         t
+    }
+
+    #[test]
+    fn buckets_by_age_and_size() {
+        let now = 2_000_000_000u64;
+        let day = 86_400u32;
+        let mut t = FileTree::new("r");
+        for (name, size, days_ago) in [
+            ("new", 10, 1),
+            ("month", 2 << 20, 20),
+            ("year", 200 << 20, 200),
+            ("old", 2 << 30, 900),
+        ] {
+            let f = t.add_file(0, name, size, size);
+            t.set_times(f, now as u32 - days_ago * day, 0);
+        }
+        let d = t.add_dir(0, "d");
+        t.add_file(d, "unknown", 5, 5);
+        t.finalize();
+        let b = buckets(&t, 0, now);
+        assert_eq!(b.age.map(|x| x.files), [1, 1, 1, 1, 1]);
+        assert_eq!(b.age[3].size, 2 << 30);
+        assert_eq!(b.size.map(|x| x.files), [1, 1, 1, 2]);
+        assert_eq!(b.size[3].size, 15);
     }
 
     #[test]
