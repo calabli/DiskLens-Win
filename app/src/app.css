@@ -105,6 +105,12 @@ input {
   user-select: text;
 }
 
+/* 下拉框本身用半透明的 --field 底色，弹出的选项列表要用不透明的底色，否则深色模式下是白底浅字。 */
+option {
+  background-color: var(--panel);
+  color: var(--ink);
+}
+
 button,
 input {
   font: inherit;
