@@ -4,6 +4,7 @@
   import { cubicOut } from "svelte/easing";
   import {
     cleanRules,
+    cleanSuggestions,
     deleteItems,
     linkItems,
     listChildren,
@@ -61,9 +62,50 @@
   const LAYOUT_KEY = "disklens.panels";
 
   type ChartKind = "treemap" | "sunburst";
+  type View = "browse" | "suggest" | "rank" | "dupes" | "similar" | "findings";
+
+  /** 左侧边栏的各个页面；图标是 16×16 的描边路径。 */
+  const VIEWS: { key: View; label: string; icon: string }[] = [
+    {
+      key: "browse",
+      label: "概览",
+      icon: "M2.5 2.5h5v6h-5zM9.5 2.5h4v3h-4zM9.5 7.5h4v6h-4zM2.5 10.5h5v3h-5z",
+    },
+    {
+      key: "suggest",
+      label: "清理建议",
+      icon: "M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3M3.4 3.4l2.1 2.1M10.5 10.5l2.1 2.1M12.6 3.4l-2.1 2.1M5.5 10.5l-2.1 2.1",
+    },
+    { key: "rank", label: "大文件与排行", icon: "M3 13.5v-5M8 13.5v-11M13 13.5v-8" },
+    { key: "dupes", label: "重复文件", icon: "M5.5 5h7v9h-7zM3.5 11.5V2.5h6.5" },
+    {
+      key: "similar",
+      label: "相似图片",
+      icon: "M2 3h12v10H2zM2 11l3.5-3.5 3 3 2-2L14 12M10.5 6.2h.01",
+    },
+    {
+      key: "findings",
+      label: "空文件夹与失效链接",
+      icon: "M1.5 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z",
+    },
+  ];
+
+  /** 收集篮里的一项。 */
+  interface BasketItem {
+    id: number;
+    name: string;
+    path: string;
+    size: number;
+    isDir: boolean;
+  }
+
+  /** 拖到收集篮时携带的数据类型：项目 id 的 JSON 数组。 */
+  const DRAG_TYPE = "application/x-disklens-ids";
 
   /** 读取上次的侧栏展开状态和图表类型；存储不可用时用默认值。 */
   interface Panels {
+    /** 左侧边栏展开（显示文字），收起时只显示图标。 */
+    nav: boolean;
     list: boolean;
     side: boolean;
     chart: ChartKind;
@@ -75,6 +117,7 @@
 
   function loadPanels(): Panels {
     const defaults: Panels = {
+      nav: true,
       list: true,
       side: true,
       chart: "treemap",
@@ -85,6 +128,7 @@
     try {
       const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}");
       return {
+        nav: saved.nav !== false,
         list: saved.list !== false,
         side: saved.side !== false,
         chart: saved.chart === "sunburst" ? "sunburst" : "treemap",
@@ -136,9 +180,13 @@
   let menuOpen = $state(false);
   /** 正在移动的文件夹。 */
   let moving = $state<{ id: number; name: string; path: string; size: number } | null>(null);
-  /** 正在用整理工具（占据主区域）。 */
-  let dupOpen = $state(false);
-  let toolTab = $state<"suggest" | "rank" | "dupes" | "similar" | "findings">("suggest");
+  /** 左侧边栏选中的页面；除了概览，其他页面占据整个主区域。 */
+  let view = $state<View>("browse");
+  /** 清理建议能释放的空间，显示在边栏上。 */
+  let reclaimable = $state(0);
+  /** 收集篮：在各处挑出要删除的项目，最后一起删除。 */
+  let basket = $state<BasketItem[]>([]);
+  let dragOver = $state(false);
   /** 本次打开后删除过的项目，用来从重复文件结果里去掉。 */
   let removed = $state(new Set<number>());
   /** 最近一次增量刷新的结果，显示在状态栏。 */
@@ -148,6 +196,7 @@
   const FOCUS_REFRESH_MS = 5000;
 
   const entries = $derived(new Map(all.entries.map((e) => [e.id, e])));
+  const basketSize = $derived(basket.reduce((sum, b) => sum + b.size, 0));
   const highlight = $derived(filtered ? new Set(filtered.entries.map((e) => e.id)) : null);
   const visible = $derived(filtered?.entries ?? all.entries);
   const selected = $derived(new Set(selection));
@@ -228,6 +277,39 @@
         });
     }, 200);
     return () => clearTimeout(timer);
+  });
+
+  // 边栏上显示清理建议能释放多少空间；删除或刷新后重新计算。
+  $effect(() => {
+    void version;
+    cleanSuggestions()
+      .then((list) => {
+        reclaimable = list.filter((s) => s.action !== "guide").reduce((sum, s) => sum + s.size, 0);
+      })
+      .catch(() => {});
+  });
+
+  // 刷新后收集篮里的项目可能已被别的程序删除或改变大小：去掉不在的，更新大小。
+  let basketVersion = untrack(() => version);
+  $effect(() => {
+    const v = version;
+    if (v === basketVersion) return;
+    basketVersion = v;
+    const items = untrack(() => basket);
+    if (items.length === 0) return;
+    Promise.all(
+      items.map((b) =>
+        nodeInfo(b.id).then(
+          (n) => ({ ...b, size: n.size, path: n.path }),
+          () => null,
+        ),
+      ),
+    ).then((list) => {
+      const alive = new Map(list.flatMap((b) => (b ? [[b.id, b] as const] : [])));
+      basket = basket.flatMap((b) =>
+        items.includes(b) ? (alive.has(b.id) ? [alive.get(b.id)!] : []) : [b],
+      );
+    });
   });
 
   $effect(() => {
@@ -362,11 +444,64 @@
     }
   }
 
+  /** 在图上定位一个搜索结果：进入它所在的文件夹并选中它，搜索结果保持打开。 */
   function reveal(hit: SearchHit) {
     if (hit.parent == null) return;
+    const keep = hits;
     go(hit.parent, 0);
     selectOnly(hit.id);
-    filter = "";
+    hits = keep;
+  }
+
+  /** `path` 是否就是 `dir` 或在它里面（Windows 路径不区分大小写）。 */
+  function within(path: string, dir: string) {
+    const p = path.toLowerCase();
+    const d = dir.toLowerCase();
+    return p === d || p.startsWith(d.endsWith("\\") ? d : d + "\\");
+  }
+
+  /** 加入收集篮。已在篮中文件夹里的项目不再重复加入；加入文件夹时去掉篮中它里面的项目。 */
+  async function addToBasket(ids: number[]) {
+    ctx = null;
+    const fresh = ids.filter((id) => !basket.some((b) => b.id === id));
+    if (fresh.length === 0) return;
+    try {
+      const infos = await Promise.all(fresh.map((id) => nodeInfo(id)));
+      let next = [...basket];
+      for (const n of infos) {
+        if (n.parent == null || next.some((b) => within(n.path, b.path))) continue;
+        next = next.filter((b) => !within(b.path, n.path));
+        next.push({ id: n.id, name: n.name, path: n.path, size: n.size, isDir: n.isDir });
+      }
+      basket = next;
+    } catch (e) {
+      toast = { message: String(e), detail: [], tone: "warn" };
+    }
+  }
+
+  function removeFromBasket(id: number) {
+    basket = basket.filter((b) => b.id !== id);
+  }
+
+  /** 从列表或图上拖动：拖的是选中的项目之一时带上全部选中项。 */
+  function dragItems(id: number, event: DragEvent) {
+    if (!event.dataTransfer) return;
+    const ids = selected.has(id) ? selection : [id];
+    event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids));
+    event.dataTransfer.effectAllowed = "copy";
+  }
+
+  function dropOnBasket(event: DragEvent) {
+    dragOver = false;
+    const data = event.dataTransfer?.getData(DRAG_TYPE);
+    if (!data) return;
+    event.preventDefault();
+    try {
+      const ids = JSON.parse(data);
+      if (Array.isArray(ids)) addToBasket(ids.filter((x) => typeof x === "number"));
+    } catch {
+      // 不是我们拖出来的数据。
+    }
   }
 
   /** 选中项先给出删除汇总，确认后再删。 */
@@ -420,6 +555,7 @@
         const gone = new Set(result.deleted);
         removed = new Set([...removed, ...gone]);
         selection = selection.filter((id) => !gone.has(id));
+        basket = basket.filter((b) => !gone.has(b.id));
         if (anchor != null && gone.has(anchor)) anchor = null;
         hoverId = null;
         if (hits) hits = hits.filter((h) => !gone.has(h.id));
@@ -603,7 +739,7 @@
   async function revealNode(id: number) {
     try {
       const n = await nodeInfo(id);
-      dupOpen = false;
+      view = "browse";
       if (n.parent != null) {
         go(n.parent, 0);
         selectOnly(id);
@@ -621,8 +757,8 @@
       ctx = null;
       return;
     }
-    if (dupOpen) {
-      if (event.key === "Escape") dupOpen = false;
+    if (view !== "browse") {
+      if (event.key === "Escape") view = "browse";
       return;
     }
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -738,33 +874,6 @@
     <span class="mode" class:good={summary.mode === "mft"}>
       {summary.mode === "mft" ? "MFT 直读" : "普通遍历"}
     </span>
-    <button
-      type="button"
-      class="tool"
-      class:on={dupOpen}
-      onclick={() => (dupOpen = !dupOpen)}
-      aria-pressed={dupOpen}
-      aria-label="整理工具"
-      title="整理工具：清理建议，以及在当前文件夹中查找重复文件、相似图片、空文件夹和失效链接"
-      ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
-        ><rect
-          x="2"
-          y="4.5"
-          width="8"
-          height="10"
-          rx="1.6"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.4"
-        ></rect><path
-          d="M5.5 2.5V2.3A.8.8 0 0 1 6.3 1.5h6.4a.8.8 0 0 1 .8.8v8.4a.8.8 0 0 1-.8.8h-.2"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.4"
-          stroke-linecap="round"
-        ></path></svg
-      ></button
-    >
     <button
       type="button"
       class="tool trash"
@@ -894,256 +1003,333 @@
     <p class="banner" role="status">{message}</p>
   {/each}
 
-  <div class="body" style:--list-w="{listWidth}px">
-    {#if dupOpen}
-      <div class="tools">
-        <div class="tool-tabs" role="tablist" aria-label="整理工具">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={toolTab === "suggest"}
-            onclick={() => (toolTab = "suggest")}>清理建议</button
-          >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={toolTab === "rank"}
-            onclick={() => (toolTab = "rank")}>排行</button
-          >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={toolTab === "dupes"}
-            onclick={() => (toolTab = "dupes")}>重复文件</button
-          >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={toolTab === "similar"}
-            onclick={() => (toolTab = "similar")}>相似图片</button
-          >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={toolTab === "findings"}
-            onclick={() => (toolTab = "findings")}>空文件夹与失效链接</button
-          >
-        </div>
-        <!-- 各页面都保持挂载，切换时不丢结果。 -->
-        <div class="tool-page" hidden={toolTab !== "suggest"}>
-          <Suggestions
-            {version}
-            onclean={askClean}
-            onreveal={revealNode}
-            onclose={() => (dupOpen = false)}
-          />
-        </div>
-        <div class="tool-page" hidden={toolTab !== "rank"}>
-          {#if toolTab === "rank"}
+  <div class="main">
+    <nav class="sidebar" class:narrow={!panels.nav} aria-label="功能">
+      {#each VIEWS as v (v.key)}
+        <button
+          type="button"
+          class:on={view === v.key}
+          aria-current={view === v.key ? "page" : undefined}
+          title={v.label}
+          onclick={() => (view = v.key)}
+          ><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"
+            ><path
+              d={v.icon}
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path></svg
+          ><span class="label">{v.label}</span>{#if v.key === "suggest" && reclaimable > 0}<span
+              class="badge">{formatSize(reclaimable)}</span
+            >{/if}</button
+        >
+      {/each}
+      <button
+        type="button"
+        class="collapse"
+        onclick={() => (panels.nav = !panels.nav)}
+        aria-label={panels.nav ? "收起边栏" : "展开边栏"}
+        title={panels.nav ? "收起边栏" : "展开边栏"}
+        ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+          ><path
+            d={panels.nav ? "M10 3.5 5.5 8l4.5 4.5" : "m6 3.5 4.5 4.5L6 12.5"}
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          ></path></svg
+        ></button
+      >
+    </nav>
+
+    <div class="body" style:--list-w="{listWidth}px">
+      {#if view !== "browse"}
+        <div class="tools">
+          {#if view === "suggest"}
+            <Suggestions
+              {version}
+              onclean={askClean}
+              onreveal={revealNode}
+              onclose={() => (view = "browse")}
+            />
+          {:else if view === "rank"}
             <Rankings
               rootId={dirId}
               rootName={title}
               {removed}
               ondelete={(ids) => askDelete(ids)}
+              onbasket={addToBasket}
               onreveal={revealNode}
-              onclose={() => (dupOpen = false)}
+              onclose={() => (view = "browse")}
+            />
+          {:else if view === "dupes"}
+            <Duplicates
+              rootId={dirId}
+              rootName={title}
+              {removed}
+              ondelete={(ids) => askDelete(ids)}
+              onbasket={addToBasket}
+              onlink={linkDuplicates}
+              onreveal={revealNode}
+              onclose={() => (view = "browse")}
+            />
+          {:else if view === "similar"}
+            <Similar
+              rootId={dirId}
+              rootName={title}
+              {removed}
+              ondelete={(ids) => askDelete(ids)}
+              onbasket={addToBasket}
+              onreveal={revealNode}
+              onclose={() => (view = "browse")}
+            />
+          {:else}
+            <Findings
+              rootId={dirId}
+              rootName={title}
+              {removed}
+              ondelete={(ids) => askDelete(ids)}
+              onbasket={addToBasket}
+              onreveal={revealNode}
+              onclose={() => (view = "browse")}
             />
           {/if}
         </div>
-        <div class="tool-page" hidden={toolTab !== "dupes"}>
-          <Duplicates
-            rootId={dirId}
-            rootName={title}
-            {removed}
-            ondelete={(ids) => askDelete(ids)}
-            onlink={linkDuplicates}
-            onreveal={revealNode}
-            onclose={() => (dupOpen = false)}
-          />
+      {:else}
+        <div class="fold list-fold" class:collapsed={!panels.list} inert={!panels.list}>
+          <section class="panel list" aria-label="项目列表">
+            {#if hits}
+              <SearchResults
+                query={searchedFor}
+                {hits}
+                onreveal={reveal}
+                onclose={() => (hits = null)}
+              />
+            {:else}
+              {#key dirId}
+                <div
+                  class="slide"
+                  in:fly={{
+                    x: direction * 28,
+                    duration: direction === 0 ? 0 : 240,
+                    easing: cubicOut,
+                  }}
+                >
+                  <ChildListView
+                    entries={filtered?.entries ?? all.entries}
+                    total={filtered?.total ?? all.total}
+                    parentSize={info?.size ?? 0}
+                    {hoverId}
+                    {selected}
+                    focusId={selectedId}
+                    columns={panels.columns}
+                    sort={panels.sort}
+                    owners={ownerCache}
+                    onhover={(id) => (hoverId = id)}
+                    onopen={open}
+                    onselect={select}
+                    onsort={sortBy}
+                    oncolumns={(c) => {
+                      panels.columns = c;
+                    }}
+                    onvisible={loadOwners}
+                    oncontext={(id, e) => openContext(id, e)}
+                    onexplore={explore}
+                    ondragitem={dragItems}
+                  />
+                </div>
+              {/key}
+            {/if}
+          </section>
         </div>
-        <div class="tool-page" hidden={toolTab !== "similar"}>
-          <Similar
-            rootId={dirId}
-            rootName={title}
-            {removed}
-            ondelete={(ids) => askDelete(ids)}
-            onreveal={revealNode}
-            onclose={() => (dupOpen = false)}
-          />
-        </div>
-        <div class="tool-page" hidden={toolTab !== "findings"}>
-          <Findings
-            rootId={dirId}
-            rootName={title}
-            {removed}
-            ondelete={(ids) => askDelete(ids)}
-            onreveal={revealNode}
-            onclose={() => (dupOpen = false)}
-          />
-        </div>
-      </div>
-    {:else}
-      <div class="fold list-fold" class:collapsed={!panels.list} inert={!panels.list}>
-        <section class="panel list" aria-label="项目列表">
-          {#if hits}
-            <SearchResults
-              query={searchedFor}
-              {hits}
-              onreveal={reveal}
-              onclose={() => (hits = null)}
+
+        <section class="panel map" aria-label={panels.chart === "sunburst" ? "旭日图" : "矩形树图"}>
+          <div class="map-head">
+            {#if focus}
+              <strong>{focus.name}</strong>
+              <span
+                >{formatSize(focus.size)} · {formatPercent(focus.size, info?.size ?? 0)}{focus.isDir
+                  ? ` · ${focus.files.toLocaleString()} 个文件`
+                  : ""}</span
+              >
+            {:else if hits}
+              <strong>搜索“{searchedFor}”</strong>
+              <span>有命中项的方块保持原色，其余变灰</span>
+            {:else if selection.length > 1}
+              <strong>已选 {selection.length} 项</strong>
+              <span
+                >{formatSize(selectedSize)} · {formatPercent(selectedSize, info?.size ?? 0)}</span
+              >
+            {:else}
+              <span
+                >{panels.chart === "sunburst"
+                  ? "点按一圈放大查看，点按圆心返回上一级；Ctrl 点按可多选"
+                  : "点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选"}</span
+              >
+            {/if}
+            <select
+              class="depth"
+              aria-label={panels.chart === "sunburst" ? "旭日图圈数" : "树图层级"}
+              title={panels.chart === "sunburst" ? "旭日图圈数" : "树图显示几层"}
+              value={panels.chart === "sunburst" ? panels.depth.sunburst : panels.depth.treemap}
+              onchange={(e) => {
+                const v = Number((e.currentTarget as HTMLSelectElement).value);
+                if (!v) return;
+                if (panels.chart === "sunburst") panels.depth.sunburst = v;
+                else panels.depth.treemap = v;
+              }}
+            >
+              {#each panels.chart === "sunburst" ? [3, 5, 7] : [1, 2, 3] as n (n)}
+                <option value={n}>{panels.chart === "sunburst" ? `${n} 圈` : `${n} 层`}</option>
+              {/each}
+            </select>
+            <div class="chart-switch" role="radiogroup" aria-label="图表类型">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={panels.chart === "treemap"}
+                title="矩形树图"
+                onclick={() => (panels.chart = "treemap")}
+                ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+                  ><rect
+                    x="1.5"
+                    y="1.5"
+                    width="13"
+                    height="13"
+                    rx="2.5"
+                    fill="none"
+                    stroke="currentColor"
+                  ></rect><path d="M8 1.5v13M8 8.5h6.5M11 8.5v6" stroke="currentColor"></path></svg
+                ></button
+              >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={panels.chart === "sunburst"}
+                title="旭日图"
+                onclick={() => (panels.chart = "sunburst")}
+                ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
+                  ><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor"></circle><circle
+                    cx="8"
+                    cy="8"
+                    r="2.6"
+                    fill="none"
+                    stroke="currentColor"
+                  ></circle><path
+                    d="M8 1.5v3.9M13.6 11.2 10.2 9.3M2.4 11.2l3.4-1.9"
+                    stroke="currentColor"
+                  ></path></svg
+                ></button
+              >
+            </div>
+          </div>
+          {#if panels.chart === "sunburst"}
+            <Sunburst
+              {dirId}
+              {version}
+              {title}
+              size={info?.size ?? 0}
+              {hoverId}
+              {selected}
+              {highlight}
+              query={hits ? searchedFor : null}
+              onhover={(id) => (hoverId = id)}
+              onopen={open}
+              onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+              onup={up}
+              depth={panels.depth.sunburst}
+              oncontext={openContext}
+              onexplore={explore}
+              ondragitem={dragItems}
             />
           {:else}
-            {#key dirId}
-              <div
-                class="slide"
-                in:fly={{
-                  x: direction * 28,
-                  duration: direction === 0 ? 0 : 240,
-                  easing: cubicOut,
-                }}
-              >
-                <ChildListView
-                  entries={filtered?.entries ?? all.entries}
-                  total={filtered?.total ?? all.total}
-                  parentSize={info?.size ?? 0}
-                  {hoverId}
-                  {selected}
-                  focusId={selectedId}
-                  columns={panels.columns}
-                  sort={panels.sort}
-                  owners={ownerCache}
-                  onhover={(id) => (hoverId = id)}
-                  onopen={open}
-                  onselect={select}
-                  onsort={sortBy}
-                  oncolumns={(c) => {
-                    panels.columns = c;
-                  }}
-                  onvisible={loadOwners}
-                  oncontext={(id, e) => openContext(id, e)}
-                  onexplore={explore}
-                />
-              </div>
-            {/key}
+            <Treemap
+              {dirId}
+              {version}
+              {entries}
+              {hoverId}
+              {selected}
+              {highlight}
+              query={hits ? searchedFor : null}
+              onhover={(id) => (hoverId = id)}
+              onopen={open}
+              onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
+              depth={panels.depth.treemap}
+              oncontext={openContext}
+              onexplore={explore}
+              ondragitem={dragItems}
+            />
           {/if}
         </section>
-      </div>
 
-      <section class="panel map" aria-label={panels.chart === "sunburst" ? "旭日图" : "矩形树图"}>
-        <div class="map-head">
-          {#if focus}
-            <strong>{focus.name}</strong>
-            <span
-              >{formatSize(focus.size)} · {formatPercent(focus.size, info?.size ?? 0)}{focus.isDir
-                ? ` · ${focus.files.toLocaleString()} 个文件`
-                : ""}</span
-            >
-          {:else if selection.length > 1}
-            <strong>已选 {selection.length} 项</strong>
-            <span>{formatSize(selectedSize)} · {formatPercent(selectedSize, info?.size ?? 0)}</span>
-          {:else}
-            <span
-              >{panels.chart === "sunburst"
-                ? "点按一圈放大查看，点按圆心返回上一级；Ctrl 点按可多选"
-                : "点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选"}</span
-            >
-          {/if}
-          <select
-            class="depth"
-            aria-label={panels.chart === "sunburst" ? "旭日图圈数" : "树图层级"}
-            title={panels.chart === "sunburst" ? "旭日图圈数" : "树图显示几层"}
-            value={panels.chart === "sunburst" ? panels.depth.sunburst : panels.depth.treemap}
-            onchange={(e) => {
-              const v = Number((e.currentTarget as HTMLSelectElement).value);
-              if (!v) return;
-              if (panels.chart === "sunburst") panels.depth.sunburst = v;
-              else panels.depth.treemap = v;
-            }}
-          >
-            {#each panels.chart === "sunburst" ? [3, 5, 7] : [1, 2, 3] as n (n)}
-              <option value={n}>{panels.chart === "sunburst" ? `${n} 圈` : `${n} 层`}</option>
-            {/each}
-          </select>
-          <div class="chart-switch" role="radiogroup" aria-label="图表类型">
-            <button
+        <div class="fold side-fold" class:collapsed={!panels.side} inert={!panels.side}>
+          <aside class="side">
+            <TypeStats {stats} {buckets} {filter} onfilter={applyFilter} />
+          </aside>
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <div
+    class="basket"
+    class:over={dragOver}
+    role="region"
+    aria-label="收集篮"
+    ondragover={(event) => {
+      if (!event.dataTransfer?.types.includes(DRAG_TYPE)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      dragOver = true;
+    }}
+    ondragleave={() => (dragOver = false)}
+    ondrop={dropOnBasket}
+  >
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
+      ><path
+        d="M2 6h12l-1.3 7.2a1 1 0 0 1-1 .8H4.3a1 1 0 0 1-1-.8zM5 6l2.2-3.5M11 6 8.8 2.5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      ></path></svg
+    >
+    <strong>收集篮</strong>
+    {#if basket.length === 0}
+      <span class="hint">把要删除的项目拖到这里，或右键选择“加入收集篮”，收集好了一起删除</span>
+    {:else}
+      <span class="sum">{basket.length} 项 · {formatSize(basketSize)}</span>
+      <div class="chips">
+        {#each basket as b (b.id)}
+          <span class="chip" title={b.path}>
+            <button type="button" class="chip-name" onclick={() => revealNode(b.id)}
+              >{b.name}</button
+            ><button
               type="button"
-              role="radio"
-              aria-checked={panels.chart === "treemap"}
-              title="矩形树图"
-              onclick={() => (panels.chart = "treemap")}
-              ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
-                ><rect
-                  x="1.5"
-                  y="1.5"
-                  width="13"
-                  height="13"
-                  rx="2.5"
-                  fill="none"
+              class="chip-x"
+              aria-label="把 {b.name} 移出收集篮"
+              onclick={() => removeFromBasket(b.id)}
+              ><svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"
+                ><path
+                  d="m4 4 8 8M12 4l-8 8"
                   stroke="currentColor"
-                ></rect><path d="M8 1.5v13M8 8.5h6.5M11 8.5v6" stroke="currentColor"></path></svg
-              ></button
-            >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={panels.chart === "sunburst"}
-              title="旭日图"
-              onclick={() => (panels.chart = "sunburst")}
-              ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
-                ><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor"></circle><circle
-                  cx="8"
-                  cy="8"
-                  r="2.6"
-                  fill="none"
-                  stroke="currentColor"
-                ></circle><path
-                  d="M8 1.5v3.9M13.6 11.2 10.2 9.3M2.4 11.2l3.4-1.9"
-                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
                 ></path></svg
               ></button
             >
-          </div>
-        </div>
-        {#if panels.chart === "sunburst"}
-          <Sunburst
-            {dirId}
-            {version}
-            {title}
-            size={info?.size ?? 0}
-            {hoverId}
-            {selected}
-            {highlight}
-            onhover={(id) => (hoverId = id)}
-            onopen={open}
-            onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
-            onup={up}
-            depth={panels.depth.sunburst}
-            oncontext={openContext}
-            onexplore={explore}
-          />
-        {:else}
-          <Treemap
-            {dirId}
-            {version}
-            {entries}
-            {hoverId}
-            {selected}
-            {highlight}
-            onhover={(id) => (hoverId = id)}
-            onopen={open}
-            onselect={(id, toggle) => select(id, toggle ? "toggle" : "only")}
-            depth={panels.depth.treemap}
-            oncontext={openContext}
-            onexplore={explore}
-          />
-        {/if}
-      </section>
-
-      <div class="fold side-fold" class:collapsed={!panels.side} inert={!panels.side}>
-        <aside class="side">
-          <TypeStats {stats} {buckets} {filter} onfilter={applyFilter} />
-        </aside>
+          </span>
+        {/each}
       </div>
+      <button type="button" class="basket-btn" onclick={() => (basket = [])}>清空</button>
+      <button
+        type="button"
+        class="basket-btn danger"
+        onclick={() => askDelete(basket.map((b) => b.id))}>删除全部…</button
+      >
     {/if}
   </div>
 
@@ -1221,6 +1407,15 @@
       <button type="button" role="menuitem" onclick={() => askMove(c.id)}>移动到其他磁盘…</button>
     {/if}
     <hr />
+    <button
+      type="button"
+      role="menuitem"
+      onclick={() =>
+        addToBasket(selection.includes(c.id) && selection.length > 1 ? selection : [c.id])}
+      >{selection.includes(c.id) && selection.length > 1
+        ? `把选中的 ${selection.length} 项加入收集篮`
+        : "加入收集篮"}</button
+    >
     <button type="button" role="menuitem" class="danger" onclick={() => contextDelete(c.id)}
       >{selection.includes(c.id) && selection.length > 1
         ? `删除选中的 ${selection.length} 项…`
@@ -1397,40 +1592,6 @@
     min-height: 0;
   }
 
-  .tool-tabs {
-    display: flex;
-    align-self: center;
-    gap: 2px;
-    padding: 2px;
-    border-radius: 8px;
-    background: var(--field);
-  }
-
-  .tool-tabs button {
-    height: 24px;
-    padding: 0 14px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--ink-2);
-  }
-
-  .tool-tabs button[aria-selected="true"] {
-    background: var(--panel);
-    color: var(--ink);
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
-  }
-
-  .tool-page {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .tool-page[hidden] {
-    display: none;
-  }
-
   .tool.on {
     background: var(--accent-soft);
     color: var(--accent);
@@ -1536,10 +1697,207 @@
     color: var(--warn);
   }
 
+  .main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
+
+  .sidebar {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 196px;
+    padding: 12px 0 10px 12px;
+    box-sizing: border-box;
+    transition: width 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .sidebar button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    height: 32px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-2);
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .sidebar button svg {
+    flex: none;
+  }
+
+  .sidebar button:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .sidebar button.on {
+    background: var(--panel);
+    color: var(--ink);
+    font-weight: 600;
+    box-shadow: var(--shadow);
+  }
+
+  .sidebar button.on svg {
+    color: var(--accent);
+  }
+
+  .label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .badge {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 10.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sidebar .collapse {
+    margin-top: auto;
+    width: 32px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sidebar.narrow {
+    width: 56px;
+  }
+
+  .sidebar.narrow .label,
+  .sidebar.narrow .badge {
+    display: none;
+  }
+
+  .sidebar.narrow button {
+    width: 36px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .basket {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 40px;
+    margin: 0 14px 10px;
+    padding: 0 8px 0 12px;
+    border: 1.5px dashed var(--line);
+    border-radius: 10px;
+    color: var(--ink-2);
+    font-size: 12px;
+    transition:
+      background-color 0.15s,
+      border-color 0.15s;
+  }
+
+  .basket.over {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .basket strong {
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .basket .hint {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .basket .sum {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .chips {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .chip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    max-width: 220px;
+    height: 24px;
+    border-radius: 6px;
+    background: var(--field);
+    color: var(--ink);
+  }
+
+  .chip-name {
+    min-width: 0;
+    padding: 0 4px 0 8px;
+    border: 0;
+    background: none;
+    color: inherit;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chip-name:hover {
+    text-decoration: underline;
+  }
+
+  .chip-x {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 2px;
+    border: 0;
+    border-radius: 5px;
+    background: none;
+    color: var(--ink-2);
+  }
+
+  .chip-x:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .basket-btn {
+    flex: none;
+    height: 26px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 7px;
+    background: var(--field);
+    color: var(--ink);
+  }
+
+  .basket-btn.danger {
+    background: var(--danger);
+    color: #fff;
+    font-weight: 500;
+  }
+
   .body {
     --list-w: 400px;
     --side-w: 250px;
     flex: 1;
+    min-width: 0;
     min-height: 0;
     display: flex;
     padding: 12px 14px;
@@ -1643,7 +2001,15 @@
   }
 
   .map-head strong {
+    flex: none;
+    max-width: 60%;
     color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .map-head span {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -1718,6 +2084,21 @@
   @media (max-width: 1100px) {
     .body {
       --list-w: 340px;
+    }
+
+    .sidebar {
+      width: 56px;
+    }
+
+    .sidebar .label,
+    .sidebar .badge {
+      display: none;
+    }
+
+    .sidebar button {
+      width: 36px;
+      justify-content: center;
+      padding: 0;
     }
 
     .side-fold,

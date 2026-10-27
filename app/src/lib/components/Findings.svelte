@@ -14,11 +14,13 @@
     /** 已经删除的项目，从结果里去掉。 */
     removed: Set<number>;
     ondelete: (ids: number[]) => void;
+    /** 把勾选的项目加入收集篮，稍后和别处的项目一起删除。 */
+    onbasket: (ids: number[]) => void;
     onreveal: (id: number) => void;
     onclose: () => void;
   }
 
-  let { rootId, rootName, removed, ondelete, onreveal, onclose }: Props = $props();
+  let { rootId, rootName, removed, ondelete, onbasket, onreveal, onclose }: Props = $props();
 
   const SECTIONS: { kind: FindingKind; title: string; note: string }[] = [
     {
@@ -206,6 +208,13 @@
       <span>已勾选 <strong>{markedCount.toLocaleString()}</strong> 项</span>
       <button type="button" class="link" onclick={() => marked.clear()} disabled={markedCount === 0}
         >全部取消</button
+      >
+      <button
+        type="button"
+        class="secondary"
+        disabled={markedCount === 0}
+        onclick={() => onbasket(items.filter((f) => marked.has(f.id)).map((f) => f.id))}
+        >加入收集篮</button
       >
       <button
         type="button"

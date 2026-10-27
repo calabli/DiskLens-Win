@@ -1,7 +1,7 @@
 //! 子树统计与搜索。
 
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use dl_tree::{FileTree, NodeId, NodeKind};
 
@@ -239,6 +239,57 @@ pub fn search(tree: &FileTree, id: NodeId, query: &Query, limit: usize) -> Vec<N
     found.into_iter().map(|(_, n)| n).collect()
 }
 
+/// 在 `id` 的子树中搜索 `query`，再看 `ids` 里的每一项和搜索结果的关系：
+/// 2 表示它本身满足条件，1 表示它下面有满足条件的项，0 表示都没有。
+/// 图表用它把命中的方块标出来。
+pub fn search_marks(tree: &FileTree, id: NodeId, query: &Query, ids: &[NodeId]) -> Vec<u8> {
+    let wanted: HashSet<NodeId> = ids.iter().copied().collect();
+    let mut hit = HashSet::new();
+    let mut inside = HashSet::new();
+    let root_dev = ancestors_in_dev_dir(tree, id);
+    let mut stack: Vec<(NodeId, bool)> = tree.children(id).map(|c| (c, root_dev)).collect();
+    while let Some((n, in_dev)) = stack.pop() {
+        let is_dir = tree.kind(n) == NodeKind::Dir;
+        if is_dir {
+            let dev = in_dev || is_dev_dir(tree.name(n));
+            stack.extend(tree.children(n).map(|c| (c, dev)));
+        }
+        let item = Item {
+            name: tree.name(n),
+            is_dir,
+            size: tree.size(n),
+            modified: tree.modified(n),
+            accessed: tree.accessed(n),
+            category: (!is_dir).then(|| classify(tree.name(n), in_dev)),
+        };
+        if !query.matches(&item) {
+            continue;
+        }
+        if wanted.contains(&n) {
+            hit.insert(n);
+        }
+        // 往上标记祖先，遇到已经标过的就停。
+        let mut p = tree.parent(n);
+        while let Some(a) = p {
+            if a == id || !inside.insert(a) {
+                break;
+            }
+            p = tree.parent(a);
+        }
+    }
+    ids.iter()
+        .map(|n| {
+            if hit.contains(n) {
+                2
+            } else if inside.contains(n) {
+                1
+            } else {
+                0
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +306,21 @@ mod tests {
         t.add_file(0, "Win11.iso", 7_000, 8_192);
         t.finalize();
         t
+    }
+
+    #[test]
+    fn search_marks_hits_and_their_folders() {
+        let t = sample();
+        let proj = t.child_by_name(0, "proj").unwrap();
+        let nm = t.child_by_name(proj, "node_modules").unwrap();
+        let media = t.child_by_name(0, "media").unwrap();
+        let iso = t.child_by_name(0, "Win11.iso").unwrap();
+        let q = Query::parse("ext:png").unwrap();
+        assert_eq!(search_marks(&t, 0, &q, &[proj, nm, media, iso]), [1, 1, 0, 0]);
+        let logo = t.child_by_name(proj, "logo.png").unwrap();
+        assert_eq!(search_marks(&t, proj, &q, &[nm, logo, proj]), [1, 2, 0]);
+        let q = Query::parse("folder: media").unwrap();
+        assert_eq!(search_marks(&t, 0, &q, &[media, proj]), [2, 0]);
     }
 
     #[test]

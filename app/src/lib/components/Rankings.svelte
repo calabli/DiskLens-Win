@@ -10,11 +10,13 @@
     /** 已经删除的项目，从结果里去掉。 */
     removed: Set<number>;
     ondelete: (ids: number[]) => void;
+    /** 把勾选的项目加入收集篮，稍后和别处的项目一起删除。 */
+    onbasket: (ids: number[]) => void;
     onreveal: (id: number) => void;
     onclose: () => void;
   }
 
-  let { rootId, rootName, removed, ondelete, onreveal, onclose }: Props = $props();
+  let { rootId, rootName, removed, ondelete, onbasket, onreveal, onclose }: Props = $props();
 
   type Mode = "largest" | "unused";
 
@@ -182,6 +184,12 @@
     <span
       >共 {shown.length.toLocaleString()} 个，{formatSize(totalSize)}；已勾选
       <strong>{marked.size}</strong> 个，<strong>{formatSize(markedSize)}</strong></span
+    >
+    <button
+      type="button"
+      class="secondary"
+      disabled={marked.size === 0}
+      onclick={() => onbasket([...marked])}>加入收集篮</button
     >
     <button
       type="button"
@@ -421,7 +429,8 @@
     flex: 1;
   }
 
-  .primary {
+  .primary,
+  .secondary {
     height: 28px;
     padding: 0 14px;
     border: 0;
@@ -429,6 +438,15 @@
     background: var(--accent);
     color: var(--accent-ink);
     font-weight: 500;
+  }
+
+  .secondary {
+    background: var(--field);
+    color: var(--ink);
+  }
+
+  .secondary:disabled {
+    opacity: 0.45;
   }
 
   .primary:disabled {

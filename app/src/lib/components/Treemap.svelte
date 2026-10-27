@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { treemap, type Entry, type TreemapRect } from "$lib/api";
-  import { assignShades, resolvePalette, type Palette } from "$lib/categories";
+  import { searchMarks, treemap, type Entry, type TreemapRect } from "$lib/api";
+  import { assignShades, litTiles, resolvePalette, type Palette } from "$lib/categories";
   import { formatSize } from "$lib/format";
 
   interface Props {
@@ -15,8 +15,10 @@
     hoverId: number | null;
     /** 选中的项目（可多选）。 */
     selected: Set<number>;
-    /** 筛选时只高亮这些 id，其余变淡；`null` 表示不筛选。 */
+    /** 筛选时只高亮这些 id，其余变灰；`null` 表示不筛选。 */
     highlight: Set<number> | null;
+    /** 正在所有子文件夹中搜索的条件：命中的方块和含有命中项的方块保持原色，其余变灰。 */
+    query: string | null;
     onhover: (id: number | null) => void;
     onopen: (id: number) => void;
     /** `toggle` 为 true 时（Ctrl+点按）加入或移出选择，否则只选这一项。 */
@@ -24,6 +26,8 @@
     oncontext: (id: number, event: MouseEvent) => void;
     /** 鼠标中键：在文件管理器中打开。 */
     onexplore: (id: number) => void;
+    /** 开始拖动一项（拖到收集篮）。 */
+    ondragitem: (id: number, event: DragEvent) => void;
   }
 
   let {
@@ -34,11 +38,13 @@
     hoverId,
     selected,
     highlight,
+    query,
     onhover,
     onopen,
     onselect,
     oncontext,
     onexplore,
+    ondragitem,
   }: Props = $props();
 
   interface Box {
@@ -158,9 +164,42 @@
     return () => clearTimeout(timer);
   });
 
+  /** 搜索结果在当前布局上的标记，见 searchMarks。 */
+  let marks = $state<Map<number, number> | null>(null);
+  let marksSeq = 0;
+  $effect(() => {
+    const q = query;
+    const list = rects;
+    const id = loadedDir;
+    const mine = ++marksSeq;
+    if (!q || list.length === 0 || id < 0) {
+      marks = null;
+      return;
+    }
+    searchMarks(
+      id,
+      q,
+      list.map((r) => r.id),
+    )
+      .then((m) => {
+        if (mine !== marksSeq) return;
+        marks = new Map(list.flatMap((r, i) => (m[i] ? [[r.id, m[i]] as const] : [])));
+      })
+      .catch(() => {
+        if (mine === marksSeq) marks = null;
+      });
+  });
+
+  /** 保持原色的方块；`null` 表示都保持原色。 */
+  const lit = $derived.by(() => {
+    if (query) return marks ? litTiles(rects, marks) : null;
+    if (!highlight) return null;
+    return litTiles(rects, new Map([...highlight].map((id) => [id, 2])));
+  });
+
   // 静态重绘：悬停、选中、筛选、名称或配色变化时。
   $effect(() => {
-    void [rects, width, height, hoverId, selected, highlight, entries, repaint];
+    void [rects, width, height, hoverId, selected, lit, entries, repaint];
     if (!transition) untrack(paint);
   });
 
@@ -236,17 +275,14 @@
     map: (r: TreemapRect) => Box,
     alpha: number,
     pal: Palette,
-    dim: Set<number> | null,
+    on: Uint8Array | null,
   ) {
-    // 嵌套的块排在所属的顶层块后面，筛选时跟着顶层块一起变淡。
-    let top = -1;
     const pick = shadesOf(list);
+    ctx.globalAlpha = alpha;
     list.forEach((r, i) => {
-      if (r.level <= 1) top = r.id;
       const b = map(r);
       if (b.w < 0.5 || b.h < 0.5) return;
-      ctx.globalAlpha = alpha * (dim && !dim.has(top) ? 0.22 : 1);
-      ctx.fillStyle = pal.fill[r.category][pick[i]];
+      ctx.fillStyle = on && !on[i] ? pal.muted : pal.fill[r.category][pick[i]];
       if (tilePath(ctx, b, b.w > 6 && b.h > 6 ? 1.5 : 0.5)) ctx.fill();
     });
     ctx.globalAlpha = 1;
@@ -318,21 +354,21 @@
     const sx = layoutSize.w > 0 ? width / layoutSize.w : 1;
     const sy = layoutSize.h > 0 ? height / layoutSize.h : 1;
     const fit = (r: Box): Box => ({ x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy });
-    drawTiles(ctx, rects, fit, 1, pal, highlight);
+    drawTiles(ctx, rects, fit, 1, pal, lit);
     ctx.textBaseline = "top";
     const family = getComputedStyle(container).fontFamily;
-    for (const rect of rects) {
+    rects.forEach((rect, i) => {
       const r = fit(rect);
       const entry = rect.level === 1 ? entries.get(rect.id) : undefined;
-      if (!entry || r.w < 52 || r.h < 24) continue;
-      if (highlight && !highlight.has(rect.id)) continue;
+      if (!entry || r.w < 52 || r.h < 24) return;
+      if (lit && !lit[i]) return;
       ctx.fillStyle = pal.ink;
       // 嵌套显示时，目录块顶部的名称栏里放名称和大小，下面是它的子项。
       if (nestedIn(rect)) {
         ctx.font = `600 11px ${family}`;
         const label = `${entry.name}  ${formatSize(entry.size)}`;
         ctx.fillText(ellipsize(ctx, label, r.w - 10), r.x + 5, r.y + 4);
-        continue;
+        return;
       }
       ctx.font = `600 12px ${family}`;
       ctx.fillText(ellipsize(ctx, entry.name, r.w - 16), r.x + 8, r.y + 7);
@@ -342,7 +378,7 @@
         ctx.fillText(formatSize(entry.size), r.x + 8, r.y + 23);
         ctx.globalAlpha = 1;
       }
-    }
+    });
 
     const hovered = rects.find((r) => r.id === hoverId);
     if (hovered && tilePath(ctx, fit(hovered), 1.5)) {
@@ -407,6 +443,12 @@
     onmouseleave={() => onhover(null)}
     {onclick}
     {oncontextmenu}
+    draggable="true"
+    ondragstart={(event) => {
+      const r = hit(event);
+      if (r) ondragitem(r.id, event);
+      else event.preventDefault();
+    }}
     {onauxclick}
     onmousedown={(e) => e.button === 1 && e.preventDefault()}
   ></canvas>

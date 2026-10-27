@@ -21,6 +21,8 @@
     removed: Set<number>;
     /** 把勾选的文件交给外层确认并删除。 */
     ondelete: (ids: number[]) => void;
+    /** 把勾选的项目加入收集篮，稍后和别处的项目一起删除。 */
+    onbasket: (ids: number[]) => void;
     /** 把勾选的文件替换为指向保留那份的硬链接（外层执行并提示结果）。 */
     onlink: (groups: LinkGroup[]) => Promise<void>;
     /** 在主界面中定位这个文件。 */
@@ -28,7 +30,8 @@
     onclose: () => void;
   }
 
-  let { rootId, rootName, removed, ondelete, onlink, onreveal, onclose }: Props = $props();
+  let { rootId, rootName, removed, ondelete, onbasket, onlink, onreveal, onclose }: Props =
+    $props();
 
   type Keep = "shortest" | "newest" | "oldest";
 
@@ -350,6 +353,14 @@
         disabled={linkPlan.count === 0}
         title="保留一份数据，其余位置换成指向它的硬链接，文件仍在原处"
         onclick={() => (confirmLink = true)}>替换为硬链接…</button
+      >
+      <button
+        type="button"
+        class="secondary"
+        disabled={markedCount === 0}
+        onclick={() =>
+          onbasket(groups.flatMap((g) => g.files.filter((f) => marked.has(f.id)).map((f) => f.id)))}
+        >加入收集篮</button
       >
       <button
         type="button"

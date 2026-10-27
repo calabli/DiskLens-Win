@@ -45,6 +45,8 @@
   --cat-document: #34c759;
   --cat-other: #ac8e68;
   --tile-ink: #1d1d1f;
+  /* 搜索时没命中的方块。 */
+  --tile-muted: #d8d8dc;
   --tile-gap: var(--panel);
 }
 
@@ -81,6 +83,7 @@
     --cat-document: #30d158;
     --cat-other: #ac8e68;
     --tile-ink: #1d1d1f;
+    --tile-muted: #4a4a4f;
   }
 }
 
