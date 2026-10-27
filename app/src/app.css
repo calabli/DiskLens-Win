@@ -1,10 +1,11 @@
 /*
- * 设计变量：接近 macOS 的配色、字体、圆角与阴影，浅色 / 深色两套，跟随系统。
+ * 设计变量：接近 macOS 的配色、字体、圆角与阴影，浅色 / 深色两套。
+ * 用哪套由 <html data-theme> 决定，见 lib/theme.ts（可跟随系统，也可固定）。
  * 树图的分类颜色也定义在这里，Canvas 绘制时从这里读取。
  */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   --font:
     -apple-system, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
@@ -50,41 +51,41 @@
   --tile-gap: var(--panel);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1c1e;
-    --panel: #2c2c2e;
-    --panel-2: #262628;
-    --ink: #f5f5f7;
-    --ink-2: #98989d;
-    --ink-3: #636366;
-    --line: rgb(255 255 255 / 0.09);
-    --line-strong: rgb(255 255 255 / 0.16);
-    --hover: rgb(255 255 255 / 0.06);
-    --stripe: rgb(255 255 255 / 0.03);
-    --track: rgb(255 255 255 / 0.1);
-    --accent: #0a84ff;
-    --accent-soft: rgb(10 132 255 / 0.22);
-    --field: rgb(255 255 255 / 0.08);
-    --good: #30d158;
-    --good-bg: rgb(48 209 88 / 0.18);
-    --warn: #ffb340;
-    --warn-bg: rgb(255 159 10 / 0.18);
-    --danger: #ff6961;
-    --danger-bg: rgb(255 69 58 / 0.18);
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.3);
-    --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.35), 0 12px 32px rgb(0 0 0 / 0.4);
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    --cat-system: #98989d;
-    --cat-app: #409cff;
-    --cat-dev: #ff9f0a;
-    --cat-media: #bf5af2;
-    --cat-package: #ffd60a;
-    --cat-document: #30d158;
-    --cat-other: #ac8e68;
-    --tile-ink: #1d1d1f;
-    --tile-muted: #4a4a4f;
-  }
+  --bg: #1c1c1e;
+  --panel: #2c2c2e;
+  --panel-2: #262628;
+  --ink: #f5f5f7;
+  --ink-2: #98989d;
+  --ink-3: #636366;
+  --line: rgb(255 255 255 / 0.09);
+  --line-strong: rgb(255 255 255 / 0.16);
+  --hover: rgb(255 255 255 / 0.06);
+  --stripe: rgb(255 255 255 / 0.03);
+  --track: rgb(255 255 255 / 0.1);
+  --accent: #0a84ff;
+  --accent-soft: rgb(10 132 255 / 0.22);
+  --field: rgb(255 255 255 / 0.08);
+  --good: #30d158;
+  --good-bg: rgb(48 209 88 / 0.18);
+  --warn: #ffb340;
+  --warn-bg: rgb(255 159 10 / 0.18);
+  --danger: #ff6961;
+  --danger-bg: rgb(255 69 58 / 0.18);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.3);
+  --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.35), 0 12px 32px rgb(0 0 0 / 0.4);
+
+  --cat-system: #98989d;
+  --cat-app: #409cff;
+  --cat-dev: #ff9f0a;
+  --cat-media: #bf5af2;
+  --cat-package: #ffd60a;
+  --cat-document: #30d158;
+  --cat-other: #ac8e68;
+  --tile-ink: #1d1d1f;
+  --tile-muted: #4a4a4f;
 }
 
 html,

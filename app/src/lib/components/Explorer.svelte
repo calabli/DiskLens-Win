@@ -30,6 +30,7 @@
     type TypeStat,
   } from "$lib/api";
   import { formatAgo, formatPercent, formatSize } from "$lib/format";
+  import { setThemeMode, themeMode, type ThemeMode } from "$lib/theme";
   import { SvelteMap } from "svelte/reactivity";
   import ChildListView, {
     COLUMNS,
@@ -178,6 +179,12 @@
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
   let refreshing = $state(false);
   let menuOpen = $state(false);
+  let theme = $state<ThemeMode>(themeMode());
+  const THEMES: { key: ThemeMode; label: string }[] = [
+    { key: "system", label: "跟随系统" },
+    { key: "light", label: "浅色" },
+    { key: "dark", label: "深色" },
+  ];
   /** 正在移动的文件夹。 */
   let moving = $state<{ id: number; name: string; path: string; size: number } | null>(null);
   /** 左侧边栏选中的页面；除了概览，其他页面占据整个主区域。 */
@@ -946,6 +953,22 @@
             >在资源管理器中显示</button
           >
           <button type="button" role="menuitem" onclick={() => copyPath()}>复制路径</button>
+          <hr />
+          <span class="menu-title">外观</span>
+          {#each THEMES as t (t.key)}
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={theme === t.key}
+              onclick={() => {
+                theme = t.key;
+                setThemeMode(t.key);
+                menuOpen = false;
+              }}
+              ><span class="check" aria-hidden="true">{theme === t.key ? "✓" : ""}</span
+              >{t.label}</button
+            >
+          {/each}
         </div>
       {/if}
     </div>
@@ -1546,6 +1569,17 @@
     position: fixed;
     top: auto;
     right: auto;
+  }
+
+  .menu-title {
+    padding: 4px 10px 2px;
+    color: var(--ink-3);
+    font-size: 11px;
+  }
+
+  .menu .check {
+    display: inline-block;
+    width: 16px;
   }
 
   .menu .key {
