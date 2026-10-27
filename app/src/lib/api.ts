@@ -160,6 +160,131 @@ export type RefreshResult =
 /** 按 USN 日志增量刷新当前结果。不能增量刷新时返回原因，由调用方决定是否完整重扫。 */
 export const refreshScan = () => invoke<RefreshResult>("refresh_scan");
 
+export interface DupProgress {
+  phase: "checking" | "hashing";
+  filesDone: number;
+  filesTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
+}
+
+export interface DupFile {
+  id: number;
+  path: string;
+  modifiedMs: number;
+  /** 硬链接数；大于 1 时删除这个名称不释放空间。 */
+  links: number;
+  /** 所在卷的序列号；只有同一个卷上的文件才能替换为硬链接。 */
+  volume: number;
+}
+
+export interface DupGroup {
+  size: number;
+  files: DupFile[];
+}
+
+export interface DupResult {
+  groups: DupGroup[];
+  moreGroups: number;
+  wasted: number;
+  candidates: number;
+  skipped: number;
+  sameFile: number;
+  bytesRead: number;
+  elapsedMs: number;
+}
+
+/** 在目录 `id` 下查找重复文件。被取消时 Promise 以“已取消”拒绝。 */
+export function findDuplicates(id: number, minSize: number, onProgress: (p: DupProgress) => void) {
+  const channel = new Channel<DupProgress>();
+  channel.onmessage = onProgress;
+  return invoke<DupResult>("find_duplicates", { id, minSize, onEvent: channel });
+}
+
+export const cancelDuplicates = () => invoke<void>("cancel_duplicates");
+
+/** 一组重复文件：保留 `keep`，把 `replace` 替换为指向它的硬链接。 */
+export interface LinkGroup {
+  keep: number;
+  replace: number[];
+}
+
+export interface LinkResult {
+  linked: number[];
+  failed: { path: string; reason: string }[];
+  freed: number;
+  logError: string | null;
+}
+
+export const linkItems = (groups: LinkGroup[]) => invoke<LinkResult>("link_items", { groups });
+
+export type FindingKind = "emptyDir" | "emptyFile" | "brokenLink" | "brokenShortcut";
+
+export interface Finding {
+  id: number;
+  path: string;
+  kind: FindingKind;
+  /** 链接或快捷方式原本指向的目标。 */
+  target: string | null;
+}
+
+export interface FindResult {
+  items: Finding[];
+  more: number;
+  checked: number;
+  elapsedMs: number;
+}
+
+/** 在目录 `id` 下查找空文件夹、空文件和失效的链接。被取消时以“已取消”拒绝。 */
+export function findIssues(id: number, onProgress: (done: number, total: number) => void) {
+  const channel = new Channel<{ done: number; total: number }>();
+  channel.onmessage = (p) => onProgress(p.done, p.total);
+  return invoke<FindResult>("find_issues", { id, onEvent: channel });
+}
+
+export const cancelIssues = () => invoke<void>("cancel_issues");
+
+export interface SimilarImage {
+  id: number;
+  path: string;
+  size: number;
+  modifiedMs: number;
+  width: number;
+  height: number;
+  /** 与组里第一张（画质最好的）相差的位数。 */
+  distance: number;
+}
+
+export interface SimilarResult {
+  groups: { files: SimilarImage[] }[];
+  moreGroups: number;
+  wasted: number;
+  images: number;
+  skipped: number;
+  decoded: number;
+  elapsedMs: number;
+}
+
+/** 在目录 `id` 下查找相似图片。被取消时以“已取消”拒绝。 */
+export function findSimilar(
+  id: number,
+  minSize: number,
+  maxDistance: number,
+  onProgress: (done: number, total: number) => void,
+) {
+  const channel = new Channel<{ done: number; total: number }>();
+  channel.onmessage = (p) => onProgress(p.done, p.total);
+  return invoke<SimilarResult>("find_similar", { id, minSize, maxDistance, onEvent: channel });
+}
+
+export const cancelSimilar = () => invoke<void>("cancel_similar");
+
+/** 图片缩略图的 blob URL，用完后应调用 `URL.revokeObjectURL`。 */
+export async function thumbnailUrl(id: number, max: number): Promise<string> {
+  const buf = await invoke<ArrayBuffer>("thumbnail", { id, max });
+  return URL.createObjectURL(new Blob([buf], { type: "image/png" }));
+}
+
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
 

@@ -1,10 +1,12 @@
-//! 清理：先检查受保护路径，再删除（默认进回收站），每一步写入操作日志。
+//! 清理：先检查受保护路径，再删除（默认进回收站）或用硬链接替换重复文件，每一步写入操作日志。
 //!
 //! - [`protect`]：哪些路径不能直接删除
 //! - [`delete`]：删除到回收站或彻底删除
+//! - [`link`]：用硬链接替换内容相同的文件
 //! - [`log`]：操作日志（JSON Lines）
 
 pub mod delete;
+pub mod link;
 pub mod log;
 pub mod protect;
 
@@ -24,6 +26,8 @@ pub struct Target {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     Deleted,
+    /// 已替换为硬链接。
+    Linked,
     /// 受保护，没有尝试删除。
     Blocked(String),
     Failed(String),
@@ -49,6 +53,34 @@ pub fn run(
                 },
             };
             if let Err(e) = log.append(&LogEntry::new(&t.path, t.size, mode, &outcome)) {
+                log_error.get_or_insert(e);
+            }
+            outcome
+        })
+        .collect();
+    (outcomes, log_error)
+}
+
+/// 用硬链接替换：每一对里把 `.1` 替换为指向 `.0` 的硬链接。`.1` 受保护时不替换。
+/// 每项都写日志，规则同 [`run`]。
+pub fn link_run(
+    pairs: &[(Target, Target)],
+    protector: &Protector,
+    log: &OpLog,
+) -> (Vec<Outcome>, Option<std::io::Error>) {
+    let mut log_error = None;
+    let outcomes = pairs
+        .iter()
+        .map(|(source, target)| {
+            let outcome = match protector.check(&target.path) {
+                Some(reason) => Outcome::Blocked(reason),
+                None => match link::replace_with_hardlink(&source.path, &target.path) {
+                    Ok(_) => Outcome::Linked,
+                    Err(e) => Outcome::Failed(e),
+                },
+            };
+            let entry = LogEntry::link(&target.path, &source.path, target.size, &outcome);
+            if let Err(e) = log.append(&entry) {
                 log_error.get_or_insert(e);
             }
             outcome

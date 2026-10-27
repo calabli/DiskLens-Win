@@ -1,8 +1,11 @@
 mod cache;
 mod cleanup;
 mod commands;
+mod dupes;
+mod findings;
 mod refresh;
 mod scan;
+mod similar;
 mod volumes;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -24,6 +27,14 @@ pub fn run() {
             commands::search,
             cleanup::plan_delete,
             cleanup::delete_items,
+            cleanup::link_items,
+            dupes::find_duplicates,
+            dupes::cancel_duplicates,
+            findings::find_issues,
+            findings::cancel_issues,
+            similar::find_similar,
+            similar::cancel_similar,
+            similar::thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

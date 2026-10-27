@@ -1,6 +1,6 @@
 [package]
 name = "dl-analyze"
-description = "DiskLens 分析：文件分类、搜索语法、类型统计"
+description = "DiskLens 分析：文件分类、搜索语法、类型统计、重复文件、相似图片"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,21 @@ license.workspace = true
 
 [dependencies]
 dl-tree.workspace = true
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+image = { version = "0.25", default-features = false, features = [
+  "bmp",
+  "gif",
+  "jpeg",
+  "png",
+  "webp",
+] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Storage_FileSystem",
+] }
 
 [dev-dependencies]
 dl-walk.workspace = true

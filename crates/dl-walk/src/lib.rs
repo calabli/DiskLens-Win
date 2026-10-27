@@ -3,8 +3,9 @@
 //! 逐个打开目录读取条目，适用于 MFT 直读不可用的场合（非 NTFS 卷、网络盘、未提权）。
 //! 多个线程同时读不同的目录，最后按目录逐层组装成树，结果与单线程一致。
 //!
-//! 不跟随符号链接和连接点，避免重复统计和循环。读不了的目录计入
-//! [`WalkResult::skipped`] 后继续，不中断整次扫描。
+//! 不跟随符号链接和连接点，避免重复统计和循环；它们本身作为空的项记在树上（与 MFT 直读一致），
+//! 以便之后查找失效链接。其他重解析点（例如 OneDrive 按需下载的文件夹）照常进入。
+//! 读不了的目录计入 [`WalkResult::skipped`] 后继续，不中断整次扫描。
 //!
 //! 占用空间：Windows 上用 `GetCompressedFileSizeW` 取实际占用（压缩、稀疏文件都准确），
 //! 再按簇向上取整。很小的文件在 NTFS 上可能直接存在 MFT 记录里、不占簇，这里会多算
@@ -172,11 +173,12 @@ fn run(
                             Ok(entries) => {
                                 for entry in entries.flatten() {
                                     let Ok(meta) = entry.metadata() else { continue };
-                                    if is_link(&meta) {
-                                        continue;
-                                    }
                                     let name = entry.file_name().to_string_lossy().into_owned();
-                                    if meta.is_dir() {
+                                    if meta.is_symlink() && is_directory(&meta) {
+                                        // 链接目录：记下名称，不进入。
+                                        let child = next_id.fetch_add(1, Ordering::Relaxed);
+                                        items.push(Item::Dir { name, id: child });
+                                    } else if meta.is_dir() {
                                         let child = next_id.fetch_add(1, Ordering::Relaxed);
                                         // 根目录下的文件夹各自成为一个顶层项目，更深的沿用父目录的。
                                         let child_top = match (live, top) {
@@ -313,17 +315,18 @@ fn assemble(root: &Path, dirs: usize, listings: Vec<(usize, Vec<Item>)>) -> File
     tree
 }
 
-/// 符号链接和连接点（以及其他重解析点）都不跟随。
-fn is_link(meta: &Metadata) -> bool {
+/// 链接本身是不是目录（目录符号链接、连接点）。链接的元数据在 Windows 上类型是“符号链接”，
+/// 不是目录，要看目录属性。`is_symlink` 只认符号链接和连接点，云文件等其他重解析点不算。
+fn is_directory(meta: &Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        meta.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0
     }
     #[cfg(not(windows))]
     {
-        meta.file_type().is_symlink()
+        meta.is_dir()
     }
 }
 
@@ -597,7 +600,12 @@ mod tests {
         assert!(status.status.success(), "mklink /J failed");
 
         let result = walk(&tmp.0).unwrap();
-        assert_eq!(result.tree.size(result.tree.root()), 4_096);
+        let t = &result.tree;
+        assert_eq!(t.size(t.root()), 4_096);
+        // 连接点本身记在树上，但是空的。
+        let link = t.child_by_name(t.root(), "link").expect("junction listed");
+        assert_eq!(t.children(link).count(), 0);
+        assert_eq!(t.file_count(t.root()), 1);
     }
 
     /// NTFS 压缩后的文件：逻辑大小不变，占用空间应明显变小。`compact` 不需要管理员权限。
