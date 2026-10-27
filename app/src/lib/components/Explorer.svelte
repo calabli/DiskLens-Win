@@ -24,6 +24,7 @@
   import ChildListView from "./ChildList.svelte";
   import ConfirmDelete from "./ConfirmDelete.svelte";
   import Duplicates from "./Duplicates.svelte";
+  import Findings from "./Findings.svelte";
   import SearchResults from "./SearchResults.svelte";
   import Sunburst from "./Sunburst.svelte";
   import Toast from "./Toast.svelte";
@@ -87,8 +88,9 @@
   let deleting = $state(false);
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
   let refreshing = $state(false);
-  /** 正在看重复文件（占据主区域）。 */
+  /** 正在用整理工具（占据主区域）。 */
   let dupOpen = $state(false);
+  let toolTab = $state<"dupes" | "findings">("dupes");
   /** 本次打开后删除过的项目，用来从重复文件结果里去掉。 */
   let removed = $state(new Set<number>());
   /** 最近一次增量刷新的结果，显示在状态栏。 */
@@ -527,8 +529,8 @@
       class:on={dupOpen}
       onclick={() => (dupOpen = !dupOpen)}
       aria-pressed={dupOpen}
-      aria-label="查找重复文件"
-      title="在当前文件夹中查找重复文件"
+      aria-label="整理工具"
+      title="整理工具：在当前文件夹中查找重复文件、空文件夹和失效链接"
       ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
         ><rect
           x="2"
@@ -643,15 +645,44 @@
 
   <div class="body">
     {#if dupOpen}
-      <Duplicates
-        rootId={dirId}
-        rootName={title}
-        {removed}
-        ondelete={(ids) => askDelete(ids)}
-        onlink={linkDuplicates}
-        onreveal={revealNode}
-        onclose={() => (dupOpen = false)}
-      />
+      <div class="tools">
+        <div class="tool-tabs" role="tablist" aria-label="整理工具">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={toolTab === "dupes"}
+            onclick={() => (toolTab = "dupes")}>重复文件</button
+          >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={toolTab === "findings"}
+            onclick={() => (toolTab = "findings")}>空文件夹与失效链接</button
+          >
+        </div>
+        <!-- 两个页面都保持挂载，切换时不丢结果。 -->
+        <div class="tool-page" hidden={toolTab !== "dupes"}>
+          <Duplicates
+            rootId={dirId}
+            rootName={title}
+            {removed}
+            ondelete={(ids) => askDelete(ids)}
+            onlink={linkDuplicates}
+            onreveal={revealNode}
+            onclose={() => (dupOpen = false)}
+          />
+        </div>
+        <div class="tool-page" hidden={toolTab !== "findings"}>
+          <Findings
+            rootId={dirId}
+            rootName={title}
+            {removed}
+            ondelete={(ids) => askDelete(ids)}
+            onreveal={revealNode}
+            onclose={() => (dupOpen = false)}
+          />
+        </div>
+      </div>
     {:else}
       <div class="fold list-fold" class:collapsed={!panels.list} inert={!panels.list}>
         <section class="panel list" aria-label="项目列表">
@@ -888,6 +919,49 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  .tools {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .tool-tabs {
+    display: flex;
+    align-self: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--field);
+  }
+
+  .tool-tabs button {
+    height: 24px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-2);
+  }
+
+  .tool-tabs button[aria-selected="true"] {
+    background: var(--panel);
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+  }
+
+  .tool-page {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .tool-page[hidden] {
+    display: none;
   }
 
   .tool.on {

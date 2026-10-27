@@ -218,6 +218,32 @@ export interface LinkResult {
 
 export const linkItems = (groups: LinkGroup[]) => invoke<LinkResult>("link_items", { groups });
 
+export type FindingKind = "emptyDir" | "emptyFile" | "brokenLink" | "brokenShortcut";
+
+export interface Finding {
+  id: number;
+  path: string;
+  kind: FindingKind;
+  /** 链接或快捷方式原本指向的目标。 */
+  target: string | null;
+}
+
+export interface FindResult {
+  items: Finding[];
+  more: number;
+  checked: number;
+  elapsedMs: number;
+}
+
+/** 在目录 `id` 下查找空文件夹、空文件和失效的链接。被取消时以“已取消”拒绝。 */
+export function findIssues(id: number, onProgress: (done: number, total: number) => void) {
+  const channel = new Channel<{ done: number; total: number }>();
+  channel.onmessage = (p) => onProgress(p.done, p.total);
+  return invoke<FindResult>("find_issues", { id, onEvent: channel });
+}
+
+export const cancelIssues = () => invoke<void>("cancel_issues");
+
 /** 缓存的扫描结果，最近的在前。 */
 export const cachedScans = () => invoke<CachedScan[]>("cached_scans");
 

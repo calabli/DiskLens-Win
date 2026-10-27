@@ -10,7 +10,7 @@ use tauri::State;
 use crate::commands::check;
 use crate::scan::AppState;
 
-fn protector() -> &'static Protector {
+pub(crate) fn protector() -> &'static Protector {
     static P: OnceLock<Protector> = OnceLock::new();
     P.get_or_init(Protector::from_env)
 }
