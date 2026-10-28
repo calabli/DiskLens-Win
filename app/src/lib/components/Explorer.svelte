@@ -44,6 +44,7 @@
   import MoveDialog from "./MoveDialog.svelte";
   import Rankings from "./Rankings.svelte";
   import Similar from "./Similar.svelte";
+  import StorageDetails from "./StorageDetails.svelte";
   import Suggestions from "./Suggestions.svelte";
   import SearchResults from "./SearchResults.svelte";
   import Sunburst from "./Sunburst.svelte";
@@ -64,7 +65,7 @@
   const LAYOUT_KEY = "disklens.panels";
 
   type ChartKind = "treemap" | "sunburst";
-  type View = "browse" | "suggest" | "rank" | "dupes" | "similar" | "findings";
+  type View = "browse" | "suggest" | "rank" | "dupes" | "similar" | "findings" | "storage";
 
   /** 左侧边栏的各个页面；图标是 16×16 的描边路径。 */
   const VIEWS: { key: View; label: string; icon: string }[] = [
@@ -89,6 +90,11 @@
       key: "findings",
       label: "空文件夹与失效链接",
       icon: "M1.5 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z",
+    },
+    {
+      key: "storage",
+      label: "存储详情",
+      icon: "M2 4.5a1.5 1.5 0 0 1 1.5-1.5h9A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5zM2 9h12M11.5 11h.01",
     },
   ];
 
@@ -1111,6 +1117,8 @@
               onreveal={revealNode}
               onclose={() => (view = "browse")}
             />
+          {:else if view === "storage"}
+            <StorageDetails {version} onreveal={revealNode} onclose={() => (view = "browse")} />
           {:else}
             <Findings
               rootId={dirId}

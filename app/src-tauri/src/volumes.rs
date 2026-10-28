@@ -18,6 +18,13 @@ pub fn list_volumes() -> Vec<Volume> {
     sys::list()
 }
 
+/// 根目录为 `root`（如 `D:\`）的卷。
+pub fn find(root: &str) -> Option<Volume> {
+    sys::list()
+        .into_iter()
+        .find(|v| v.root.eq_ignore_ascii_case(root))
+}
+
 #[cfg(windows)]
 mod sys {
     use super::Volume;

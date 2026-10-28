@@ -119,6 +119,32 @@ export function searchMarks(id: number, query: string, ids: number[]): Promise<n
   return invoke("search_marks", { id, query, ids });
 }
 
+/** 存储详情：磁盘用量，以及扫描结果里 Windows 自己占用的位置。 */
+export interface StorageDetails {
+  volume: Volume | null;
+  /** 扫描范围的占用空间。 */
+  scanned: number;
+  /** 扫描的是整个磁盘；只有这时才会列出系统位置。 */
+  wholeVolume: boolean;
+  items: SystemItem[];
+}
+
+export interface SystemItem {
+  /** 类别，例如 `pagefile`、`winsxs`。 */
+  key: string;
+  allocated: number;
+  places: { id: number; path: string; allocated: number }[];
+}
+
+export function storageDetails(): Promise<StorageDetails> {
+  return invoke("storage_details");
+}
+
+/** 打开 Windows 设置里的“存储”页面。 */
+export function openStorageSettings(): Promise<void> {
+  return invoke("open_storage_settings");
+}
+
 /** 扫描时读不了的文件夹和原因。 */
 export interface UnreadableDir {
   path: string;
