@@ -9,6 +9,7 @@ mod refresh;
 mod rules;
 mod scan;
 mod similar;
+mod storage;
 mod volumes;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -35,6 +36,8 @@ pub fn run() {
             commands::search,
             commands::search_marks,
             commands::locate,
+            storage::storage_details,
+            storage::open_storage_settings,
             cleanup::plan_delete,
             cleanup::delete_items,
             cleanup::link_items,

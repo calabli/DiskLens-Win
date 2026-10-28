@@ -456,14 +456,7 @@ pub fn locate(path: String, state: State<'_, AppState>) -> Result<Option<NodeId>
     } else {
         return Ok(None);
     };
-    let mut id = root;
-    for part in rest.split('\\').filter(|p| !p.is_empty()) {
-        match t.child_by_name(id, part) {
-            Some(c) => id = c,
-            None => return Ok(None),
-        }
-    }
-    Ok(Some(id))
+    Ok(crate::storage::find_path(&t, root, rest))
 }
 
 /// 图表上标出搜索结果：`ids` 是画出来的方块，返回每一项的标记，见 [`dl_analyze::search_marks`]。
