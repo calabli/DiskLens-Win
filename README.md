@@ -11,6 +11,7 @@ Windows 磁盘空间分析与管理工具：直读 NTFS MFT 快速扫描，用�
 | `app/src-tauri` | Tauri 2 外壳，把内核包装成命令 |
 | `app/src` | 前端（SvelteKit 静态模式 + Svelte 5 + TypeScript） |
 | `tests/fixtures` | 测试卷生成脚本 |
+| `docs` | 产品官网（单个静态页面，可用 GitHub Pages 从 `main` 的 `/docs` 发布） |
 
 后续里程碑会加入 `dl-ntfs`、`dl-analyze`、`dl-clean`、`dl-snapshot`、`dl-cli`。
 

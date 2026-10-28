@@ -1,0 +1,1616 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="DiskLens：给 Windows 用的磁盘空间分析工具。把整块磁盘画成能点进去的方块图，告诉你哪些可以放心删、删了会怎样。">
+<title>DiskLens for Windows</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* 版式：产品发布页式的大标题章节，浅色主体与黑色章节交替；正文 980px 居中，演示窗口更宽。 */
+  :root {
+    --bg: #fbfbfd;
+    --bg-alt: #f0f0f4;
+    --ink: #1d1d1f;
+    --ink-2: #6e6e73;
+    --line: rgb(0 0 0 / 0.1);
+    --card: #ffffff;
+    --band: #000000;
+    --band-ink: #f5f5f7;
+    --band-ink-2: #a1a1a6;
+    --band-card: #1d1d1f;
+    --accent: #0071e3;
+    --accent-ink: #ffffff;
+    --link: #0066cc;
+    --good: #248a3d;
+    --good-bg: rgb(52 199 89 / 0.14);
+    --warn: #b25000;
+    --warn-bg: rgb(255 149 0 / 0.16);
+    --danger: #d70015;
+    --danger-bg: rgb(255 59 48 / 0.12);
+
+    /* 演示窗口，取自 DiskLens 本身的配色 */
+    --win: #ffffff;
+    --win-2: #f5f5f7;
+    --win-side: #f0f0f3;
+    --field: rgb(0 0 0 / 0.05);
+    --hover: rgb(0 0 0 / 0.04);
+    --cat-system: #8e8e93;
+    --cat-app: #4a9dff;
+    --cat-dev: #ff9f0a;
+    --cat-media: #bf7af0;
+    --cat-package: #ffd426;
+    --cat-document: #34c759;
+    --cat-other: #ac8e68;
+    --tile-ink: #1d1d1f;
+    --tile-muted: #d8d8dc;
+
+    --font: "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --wrap: 980px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000000;
+      --bg-alt: #101012;
+      --ink: #f5f5f7;
+      --ink-2: #a1a1a6;
+      --line: rgb(255 255 255 / 0.12);
+      --card: #1c1c1e;
+      --band: #161617;
+      --band-ink: #f5f5f7;
+      --band-ink-2: #a1a1a6;
+      --band-card: #232325;
+      --accent: #0a84ff;
+      --link: #2997ff;
+      --good: #30d158;
+      --good-bg: rgb(48 209 88 / 0.18);
+      --warn: #ffb340;
+      --warn-bg: rgb(255 159 10 / 0.18);
+      --danger: #ff6961;
+      --danger-bg: rgb(255 69 58 / 0.18);
+      --win: #2c2c2e;
+      --win-2: #262628;
+      --win-side: #1f1f21;
+      --field: rgb(255 255 255 / 0.08);
+      --hover: rgb(255 255 255 / 0.06);
+      --cat-system: #98989d;
+      --cat-app: #409cff;
+      --cat-media: #bf5af2;
+      --cat-package: #ffd60a;
+      --cat-document: #30d158;
+      --tile-muted: #4a4a4f;
+      color-scheme: dark;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #000000;
+    --bg-alt: #101012;
+    --ink: #f5f5f7;
+    --ink-2: #a1a1a6;
+    --line: rgb(255 255 255 / 0.12);
+    --card: #1c1c1e;
+    --band: #161617;
+    --band-ink: #f5f5f7;
+    --band-ink-2: #a1a1a6;
+    --band-card: #232325;
+    --accent: #0a84ff;
+    --link: #2997ff;
+    --good: #30d158;
+    --good-bg: rgb(48 209 88 / 0.18);
+    --warn: #ffb340;
+    --warn-bg: rgb(255 159 10 / 0.18);
+    --danger: #ff6961;
+    --danger-bg: rgb(255 69 58 / 0.18);
+    --win: #2c2c2e;
+    --win-2: #262628;
+    --win-side: #1f1f21;
+    --field: rgb(255 255 255 / 0.08);
+    --hover: rgb(255 255 255 / 0.06);
+    --cat-system: #98989d;
+    --cat-app: #409cff;
+    --cat-media: #bf5af2;
+    --cat-package: #ffd60a;
+    --cat-document: #30d158;
+    --tile-muted: #4a4a4f;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 17px/1.6 var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    height: env(safe-area-inset-top, 0px);
+    z-index: 30;
+    background: var(--bg);
+  }
+
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+  .gutter {
+    padding-left: max(20px, env(safe-area-inset-left, 0px));
+    padding-right: max(20px, env(safe-area-inset-right, 0px));
+  }
+
+  .wrap { max-width: var(--wrap); margin: 0 auto; }
+
+  /* ---------- 导航 ---------- */
+  .nav {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 20;
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav .wrap {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    height: 48px;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+
+  .brand:hover { text-decoration: none; }
+
+  .nav-links {
+    display: flex;
+    gap: 24px;
+    margin-left: auto;
+    font-size: 12.5px;
+  }
+
+  .nav-links a { color: var(--ink-2); }
+  .nav-links a:hover { color: var(--ink); text-decoration: none; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-size: 12.5px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .pill:hover { text-decoration: none; filter: brightness(1.08); }
+
+  /* ---------- 通用排版 ---------- */
+  section { padding-block: clamp(80px, 12vw, 140px); }
+
+  .eyebrow {
+    margin: 0 0 14px;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+
+  h2 {
+    font-size: clamp(36px, 6.2vw, 64px);
+    font-weight: 900;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
+  }
+
+  .lead {
+    max-width: 640px;
+    margin: 24px 0 0;
+    color: var(--ink-2);
+    font-size: clamp(17px, 2vw, 21px);
+    line-height: 1.6;
+  }
+
+  .lead strong { color: var(--ink); font-weight: 500; }
+
+  .center { text-align: center; }
+  .center .lead { margin-left: auto; margin-right: auto; }
+
+  .band {
+    background: var(--band);
+    color: var(--band-ink);
+  }
+
+  .band .lead { color: var(--band-ink-2); }
+  .band .lead strong { color: var(--band-ink); }
+
+  .alt { background: var(--bg-alt); }
+
+  /* ---------- 首屏 ---------- */
+  .hero { padding-block: clamp(56px, 9vw, 96px) clamp(64px, 9vw, 110px); }
+
+  .hero .eyebrow {
+    color: var(--ink-2);
+    font-size: 17px;
+    font-weight: 500;
+  }
+
+  .hero h1 {
+    font-size: clamp(46px, 9vw, 104px);
+    font-weight: 900;
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+  }
+
+  .hero h1 .grad {
+    background: linear-gradient(100deg, var(--cat-app) 0%, var(--cat-media) 45%, var(--cat-dev) 80%, var(--cat-package) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 14px 28px;
+    margin-top: 32px;
+    font-size: 17px;
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    height: 44px;
+    padding: 0 22px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 500;
+  }
+
+  .button:hover { text-decoration: none; filter: brightness(1.08); }
+
+  .more::after { content: " ›"; }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 22px;
+    margin: 22px 0 0;
+    padding: 0;
+    color: var(--ink-2);
+    font-size: 13px;
+    list-style: none;
+  }
+
+  /* ---------- 演示窗口 ---------- */
+  .stage {
+    max-width: 1180px;
+    margin: clamp(48px, 7vw, 80px) auto 0;
+  }
+
+  .window {
+    display: flex;
+    flex-direction: column;
+    height: clamp(420px, 56vw, 640px);
+    overflow: hidden;
+    border-radius: 14px;
+    background: var(--win-2);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.4;
+    box-shadow:
+      0 0 0 1px var(--line),
+      0 30px 80px -20px rgb(0 0 0 / 0.35),
+      0 12px 24px -12px rgb(0 0 0 / 0.2);
+  }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 50px;
+    padding: 0 0 0 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--win-2);
+  }
+
+  .titlebar .t {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .titlebar .t b { font-size: 13.5px; }
+
+  .titlebar .t span {
+    color: var(--ink-2);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .win-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: min(300px, 34%);
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    background: var(--field);
+    color: var(--ink-2);
+    font: 12px var(--mono);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .win-search .q { color: var(--ink); }
+
+  .mode {
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--good-bg);
+    color: var(--good);
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .caption-btns {
+    display: flex;
+    align-self: stretch;
+  }
+
+  .caption-btns i {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    color: var(--ink-2);
+    font-style: normal;
+    font-size: 12px;
+  }
+
+  .win-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    gap: 10px;
+    padding: 10px 10px 8px 0;
+  }
+
+  .win-side {
+    flex: none;
+    width: 168px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-left: 10px;
+  }
+
+  .win-side span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 9px;
+    border-radius: 7px;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+
+  .win-side span.on {
+    background: var(--win);
+    color: var(--ink);
+    font-weight: 700;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 2px 8px rgb(0 0 0 / 0.05);
+  }
+
+  .win-side span.on svg { color: var(--accent); }
+
+  .win-side .badge {
+    margin-left: auto;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border-radius: 11px;
+    background: var(--win);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 4px 16px rgb(0 0 0 / 0.05);
+    overflow: hidden;
+  }
+
+  .win-list { flex: none; width: 31%; }
+
+  .list-head,
+  .row {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) 70px 54px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .list-head {
+    height: 34px;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .list-head .num,
+  .row .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .rows { overflow-y: auto; padding: 4px 6px; }
+
+  .row {
+    width: 100%;
+    height: 32px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .row:nth-child(even) { background: var(--hover); }
+  .row:hover, .row.hot { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.dim { color: var(--ink-2); }
+  .row .pct { color: var(--ink-2); }
+
+  .win-map { flex: 1; }
+
+  .map-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 6px 12px;
+    color: var(--ink-2);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .crumb {
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 5px;
+    background: var(--field);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .map-head strong { color: var(--ink); }
+  .map-head .info { overflow: hidden; text-overflow: ellipsis; }
+
+  .canvas-box {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    margin: 0 8px 8px;
+  }
+
+  .canvas-box canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+
+  .win-basket {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 38px;
+    margin: 0 10px 10px;
+    padding: 0 12px;
+    border: 1.5px dashed var(--line);
+    border-radius: 10px;
+    color: var(--ink-2);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .win-basket b { color: var(--ink); }
+
+  .tries {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-top: 26px;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .chip {
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--card);
+    color: var(--ink);
+    font: 13px var(--mono);
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  }
+
+  .chip:hover { border-color: var(--accent); }
+
+  .chip[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .demo-note {
+    margin: 14px 0 0;
+    color: var(--ink-2);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  /* ---------- 速度 ---------- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 36px 28px;
+    margin-top: clamp(48px, 7vw, 72px);
+  }
+
+  .stat b {
+    display: block;
+    font-size: clamp(40px, 5.4vw, 60px);
+    font-weight: 900;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat b small {
+    margin-left: 4px;
+    font-size: 0.42em;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+
+  .stat:nth-child(1) b { color: var(--cat-app); }
+  .stat:nth-child(2) b { color: var(--cat-document); }
+  .stat:nth-child(3) b { color: var(--cat-dev); }
+  .stat:nth-child(4) b { color: var(--cat-media); }
+
+  .stat p {
+    margin: 12px 0 0;
+    color: var(--band-ink-2);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .how {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px;
+    margin-top: 64px;
+    padding-top: 40px;
+    border-top: 1px solid rgb(255 255 255 / 0.14);
+  }
+
+  .how h3 { font-size: 17px; font-weight: 700; }
+
+  .how p {
+    margin: 8px 0 0;
+    color: var(--band-ink-2);
+    font-size: 14px;
+  }
+
+  code {
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: var(--field);
+    font: 0.86em var(--mono);
+  }
+
+  .band code { background: rgb(255 255 255 / 0.12); }
+
+  /* ---------- 看得清 ---------- */
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(28px, 5vw, 64px);
+    align-items: center;
+    margin-top: clamp(48px, 7vw, 72px);
+  }
+
+  .sun-card {
+    aspect-ratio: 1;
+    max-width: 100%;
+    padding: 6%;
+    border-radius: 28px;
+    background: var(--card);
+    box-shadow: 0 0 0 1px var(--line);
+  }
+
+  .sun-card canvas { width: 100%; height: 100%; display: block; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin: 28px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  .legend li { display: flex; align-items: center; gap: 8px; }
+
+  .swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+  }
+
+  .ticks {
+    display: grid;
+    gap: 18px;
+    margin: 32px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ticks li {
+    padding-left: 16px;
+    border-left: 2px solid var(--line);
+  }
+
+  .ticks b { display: block; font-size: 16px; }
+  .ticks span { color: var(--ink-2); font-size: 15px; }
+
+  /* ---------- 搜索 ---------- */
+  .syntax {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px;
+    margin-top: clamp(40px, 6vw, 64px);
+    overflow: hidden;
+    border-radius: 18px;
+  }
+
+  .syntax div {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 22px 24px;
+    background: var(--band-card);
+  }
+
+  .syntax code {
+    align-self: flex-start;
+    padding: 0;
+    background: none;
+    color: var(--band-ink);
+    font-size: 17px;
+  }
+
+  .syntax span { color: var(--band-ink-2); font-size: 14px; }
+
+  /* ---------- 清理 ---------- */
+  .suggest {
+    margin-top: clamp(40px, 6vw, 64px);
+    overflow: hidden;
+    border-radius: 20px;
+    background: var(--card);
+    box-shadow: 0 0 0 1px var(--line), 0 20px 50px -30px rgb(0 0 0 / 0.3);
+  }
+
+  .suggest-top {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    padding: 22px 24px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .suggest-top b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .suggest-top span { color: var(--ink-2); font-size: 14px; }
+
+  .rule {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: 4px 12px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .rule:last-child { border-bottom: 0; }
+
+  .rule input { margin: 4px 0 0; accent-color: var(--accent); }
+
+  .rule h3 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .rule .size {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .rule p {
+    grid-column: 2 / 4;
+    margin: 0;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+
+  .rule p b { color: var(--ink); font-weight: 500; }
+
+  .risk {
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 700;
+  }
+
+  .risk.low { background: var(--good-bg); color: var(--good); }
+  .risk.medium { background: var(--warn-bg); color: var(--warn); }
+  .risk.high { background: var(--danger-bg); color: var(--danger); }
+
+  .triple {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px;
+    margin-top: 48px;
+  }
+
+  .triple h3 { font-size: 17px; font-weight: 700; }
+  .triple p { margin: 8px 0 0; color: var(--ink-2); font-size: 15px; }
+
+  .basket-demo {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 48px;
+    padding: 16px 18px;
+    border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, var(--line));
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    font-size: 14px;
+  }
+
+  .basket-demo b { margin-right: 4px; }
+
+  .basket-demo .item {
+    padding: 4px 10px;
+    border-radius: 7px;
+    background: var(--card);
+    box-shadow: 0 0 0 1px var(--line);
+    font-size: 13px;
+  }
+
+  .basket-demo .sum {
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .basket-demo .del {
+    margin-left: auto;
+    padding: 5px 12px;
+    border-radius: 7px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  /* ---------- 更多 ---------- */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+    margin-top: clamp(40px, 6vw, 64px);
+  }
+
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 28px 26px 30px;
+    border-radius: 22px;
+    background: var(--card);
+  }
+
+  .tile svg { color: var(--tc, var(--accent)); }
+  .tile h3 { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
+  .tile p { margin: 0; color: var(--ink-2); font-size: 15px; }
+
+  /* ---------- 隐私 ---------- */
+  .privacy-mark {
+    display: grid;
+    place-items: center;
+    width: 76px;
+    height: 76px;
+    margin: 0 auto 28px;
+    border-radius: 22px;
+    background: linear-gradient(145deg, var(--cat-app), var(--cat-media));
+    color: #fff;
+  }
+
+  /* ---------- 规格 ---------- */
+  .specs {
+    margin-top: clamp(40px, 6vw, 56px);
+    border-top: 1px solid var(--line);
+  }
+
+  .specs div {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 8px 24px;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .specs dt { font-weight: 700; }
+  .specs dd { margin: 0; color: var(--ink-2); }
+
+  /* ---------- 结尾 ---------- */
+  .final h2 { font-size: clamp(44px, 8vw, 88px); }
+
+  footer {
+    padding-block: 28px 40px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: 12px;
+  }
+
+  footer .wrap {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px 24px;
+  }
+
+  /* ---------- 窄屏 ---------- */
+  @media (max-width: 900px) {
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .win-side { display: none; }
+    .win-body { padding-left: 10px; }
+  }
+
+  @media (max-width: 720px) {
+    .nav-links { display: none; }
+    .nav .pill { margin-left: auto; }
+    .split, .how, .triple, .syntax { grid-template-columns: minmax(0, 1fr); }
+    .win-list, .mode, .caption-btns { display: none; }
+    .win-search { width: auto; flex: 1; margin-right: 12px; }
+    .window { height: 440px; }
+    .specs div { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  @media (max-width: 480px) {
+    .stats, .tiles { grid-template-columns: minmax(0, 1fr); }
+    .titlebar .t span { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+</style>
+<style>
+  /* 页面骨架：发布到 claude.ai 时由平台提供，独立部署时放在这里。 */
+  :root {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="nav gutter">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="DiskLens 首页">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <rect x="2" y="2" width="20" height="20" rx="6" fill="var(--cat-app)"></rect>
+        <rect x="5" y="5" width="7.5" height="14" rx="2" fill="#fff" opacity=".95"></rect>
+        <rect x="14" y="5" width="5" height="6" rx="1.6" fill="#fff" opacity=".75"></rect>
+        <rect x="14" y="12.5" width="5" height="6.5" rx="1.6" fill="#fff" opacity=".55"></rect>
+      </svg>
+      DiskLens
+    </a>
+    <nav class="nav-links" aria-label="页面导航">
+      <a href="#speed">速度</a>
+      <a href="#see">方块图</a>
+      <a href="#search">搜索</a>
+      <a href="#clean">清理</a>
+      <a href="#more">更多功能</a>
+      <a href="#specs">规格</a>
+    </nav>
+    <a class="pill" href="#get">即将发布</a>
+  </div>
+</header>
+
+<main id="top">
+  <!-- 首屏 -->
+  <section class="hero gutter center">
+    <div class="wrap">
+      <p class="eyebrow">DiskLens for Windows</p>
+      <h1>磁盘满了，<br><span class="grad">一眼看出是谁。</span></h1>
+      <p class="lead">DiskLens 把整块磁盘画成一张能点进去的地图，按类型上色，越大越显眼。再告诉你哪些可以放心删、删了会怎样。</p>
+      <div class="ctas">
+        <a class="button" href="#get">即将发布</a>
+        <a class="more" href="#speed">看看它能做什么</a>
+      </div>
+      <ul class="facts">
+        <li>Windows 10 / 11 · 64 位</li>
+        <li>安装包约 2 MB</li>
+        <li>不联网，不上传任何数据</li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <div class="window" role="group" aria-label="DiskLens 界面演示">
+        <div class="titlebar">
+          <div class="t">
+            <b id="win-title">C:\</b>
+            <span id="win-sub">312 GB · 1,204,331 个文件</span>
+          </div>
+          <div class="win-search" aria-live="polite">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.6"></path></svg>
+            <span id="win-query">搜索，如 size:&gt;1gb ext:iso</span>
+          </div>
+          <span class="mode">MFT 直读</span>
+          <div class="caption-btns" aria-hidden="true"><i>─</i><i>▢</i><i>✕</i></div>
+        </div>
+        <div class="win-body">
+          <div class="win-side" aria-hidden="true">
+            <span class="on"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M2.5 2.5h5v6h-5zM9.5 2.5h4v3h-4zM9.5 7.5h4v6h-4zM2.5 10.5h5v3h-5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>概览</span>
+            <span><svg viewBox="0 0 16 16" width="15" height="15"><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3M3.4 3.4l2.1 2.1M10.5 10.5l2.1 2.1M12.6 3.4l-2.1 2.1M5.5 10.5l-2.1 2.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path></svg>清理建议<em class="badge">19.4 GB</em></span>
+            <span><svg viewBox="0 0 16 16" width="15" height="15"><path d="M3 13.5v-5M8 13.5v-11M13 13.5v-8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path></svg>大文件与排行</span>
+            <span><svg viewBox="0 0 16 16" width="15" height="15"><path d="M5.5 5h7v9h-7zM3.5 11.5V2.5h6.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>重复文件</span>
+            <span><svg viewBox="0 0 16 16" width="15" height="15"><path d="M2 3h12v10H2zM2 11l3.5-3.5 3 3 2-2L14 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>相似图片</span>
+            <span><svg viewBox="0 0 16 16" width="15" height="15"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>空文件夹与失效链接</span>
+            <span><svg viewBox="0 0 16 16" width="15" height="15"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5zM2 9h12" fill="none" stroke="currentColor" stroke-width="1.4"></path></svg>存储详情</span>
+          </div>
+          <div class="panel win-list">
+            <div class="list-head"><span></span><span>名称</span><span class="num">大小 ↓</span><span class="num">占比</span></div>
+            <div class="rows" id="rows"></div>
+          </div>
+          <div class="panel win-map">
+            <div class="map-head" id="map-head"></div>
+            <div class="canvas-box"><canvas id="treemap" aria-label="磁盘方块图，点按文件夹进入"></canvas></div>
+          </div>
+        </div>
+        <div class="win-basket"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6h12l-1.3 7.2a1 1 0 0 1-1 .8H4.3a1 1 0 0 1-1-.8zM5 6l2.2-3.5M11 6 8.8 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg><b>收集篮</b>把要删除的项目拖到这里，收集好了一起删除</div>
+      </div>
+      <div class="tries" role="group" aria-label="在演示里试试搜索">
+        <span>试试搜索：</span>
+        <button type="button" class="chip" data-q="media" aria-pressed="false">type:音视频</button>
+        <button type="button" class="chip" data-q="big" aria-pressed="false">size:&gt;10gb</button>
+        <button type="button" class="chip" data-q="node" aria-pressed="false">folder: node_modules</button>
+        <button type="button" class="chip" data-q="stale" aria-pressed="false">da:&lt;1y</button>
+      </div>
+      <p class="demo-note">界面演示，数据为示例。点一个文件夹方块进入，Esc 或点路径返回。</p>
+    </div>
+  </section>
+
+  <!-- 速度 -->
+  <section class="band gutter" id="speed">
+    <div class="wrap">
+      <p class="eyebrow">速度</p>
+      <h2>一百多万个文件，<br>半分钟看完。</h2>
+      <p class="lead">以管理员身份运行时，DiskLens 直接读取 NTFS 的主文件表，<strong>不用一个个打开文件夹</strong>。扫描结果会保存下来，下次打开只读取这之后的变化。</p>
+      <div class="stats">
+        <div class="stat"><b>28.5<small>秒</small></b><p>扫完一块装有 163 万个文件的 200 GB 数据盘。这还是没有管理员权限时的普通遍历。</p></div>
+        <div class="stat"><b>MFT</b><p>以管理员身份扫描整块 NTFS 磁盘时，直接读主文件表，不受文件夹权限限制。</p></div>
+        <div class="stat"><b>USN</b><p>再次打开或切回窗口时，按 USN 日志只更新变过的文件，不必重扫。</p></div>
+        <div class="stat"><b>2.1<small>MB</small></b><p>整个安装包的大小。界面用系统自带的 WebView2，不另带浏览器。</p></div>
+      </div>
+      <div class="how">
+        <div><h3>边扫边看</h3><p>扫描还没结束，最大的几个文件夹就已经排在眼前，越扫越准。</p></div>
+        <div><h3>算的是真实占用</h3><p>按磁盘上实际分配的空间统计，压缩和稀疏文件都算得准。逻辑大小和占用空间分开显示。</p></div>
+        <div><h3>读不到的也告诉你</h3><p>没有权限打开的文件夹单独列出原因，一键以管理员身份重新扫描。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 看得清 -->
+  <section class="gutter" id="see">
+    <div class="wrap">
+      <p class="eyebrow" style="color: var(--cat-media)">方块图与旭日图</p>
+      <h2>空间去哪了，<br>颜色先告诉你。</h2>
+      <p class="lead">方块越大，占得越多。七种颜色对应七类文件，<strong>相邻的方块一定深浅不同</strong>，挤在一起也分得开。换成旭日图，文件夹一圈圈往外展开，层级关系一目了然。</p>
+      <div class="split">
+        <div class="sun-card"><canvas id="sunburst" aria-label="旭日图示例"></canvas></div>
+        <div>
+          <ul class="legend" id="legend"></ul>
+          <ul class="ticks">
+            <li><b>方块里再套方块</b><span>一次显示一到三层，不用点进去也能看到大文件夹里装的是什么。</span></li>
+            <li><b>列表和图联动</b><span>选中、放大、返回，左边的列表和右边的图一起动。Ctrl 点按可以多选。</span></li>
+            <li><b>中键直接打开</b><span>在任何一行或一个方块上按鼠标中键，资源管理器就停在那个位置。</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 搜索 -->
+  <section class="band gutter" id="search">
+    <div class="wrap">
+      <p class="eyebrow" style="color: var(--cat-dev)">搜索</p>
+      <h2>几百万个文件里，<br>打几个字就找到。</h2>
+      <p class="lead">在整次扫描里搜索文件和文件夹，按大小从大到小排好。搜索时，<strong>没命中的方块变成灰色</strong>，要找的东西在哪儿一眼就能看到。</p>
+      <div class="syntax">
+        <div><code>size:&gt;1gb</code><span>大于 1 GB 的文件和文件夹</span></div>
+        <div><code>ext:iso;zip</code><span>扩展名是其中之一</span></div>
+        <div><code>type:音视频</code><span>按类别，七类都可以</span></div>
+        <div><code>dm:&gt;7d</code><span>最近 7 天内修改过</span></div>
+        <div><code>da:&lt;1y</code><span>一年以上没打开过</span></div>
+        <div><code>folder:</code> <span>只要文件夹；换成 <code>file:</code> 只要文件</span></div>
+        <div><code>!backup</code><span>名称里不含 backup</span></div>
+        <div><code>"program files"</code><span>带空格的名称用引号括起来</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 清理 -->
+  <section class="alt gutter" id="clean">
+    <div class="wrap">
+      <p class="eyebrow" style="color: var(--cat-document)">清理建议</p>
+      <h2>不只告诉你能删什么，<br>还告诉你删了会怎样。</h2>
+      <p class="lead">二十多条内置规则，覆盖浏览器缓存、系统临时文件、Windows 更新缓存，以及 node_modules、Rust、.NET、Gradle、Maven 这些开发产物。每一条都写明后果，<strong>只有低风险的会默认勾选</strong>。</p>
+
+      <div class="suggest" aria-label="清理建议示例">
+        <div class="suggest-top"><b>可以释放 19.4 GB</b><span>其中 14.8 GB 是可以放心清理的缓存（示例数据）</span></div>
+        <div class="rule"><input type="checkbox" checked aria-label="Chrome 缓存"><h3>Chrome 缓存 <span class="risk low">低风险</span></h3><span class="size">3.2 GB</span><p><b>删除后：</b>网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。建议先关闭 Chrome。</p></div>
+        <div class="rule"><input type="checkbox" checked aria-label="Windows 更新下载缓存"><h3>Windows 更新下载缓存 <span class="risk low">低风险</span></h3><span class="size">2.6 GB</span><p><b>删除后：</b>如果有更新正在下载或等待安装，可能需要重新下载。</p></div>
+        <div class="rule"><input type="checkbox" checked aria-label="node_modules"><h3>node_modules <span class="risk low">低风险</span></h3><span class="size">9.0 GB</span><p><b>删除后：</b>再次运行项目前需要执行 npm install（或 pnpm / yarn install）重新安装。</p></div>
+        <div class="rule"><input type="checkbox" aria-label="旧系统备份"><h3>旧系统备份（Windows.old） <span class="risk medium">中风险</span></h3><span class="size">4.6 GB</span><p><b>删除后：</b>无法回退到以前的 Windows 版本。</p></div>
+        <div class="rule"><input type="checkbox" disabled aria-label="休眠文件"><h3>休眠文件 <span class="risk high">高风险</span></h3><span class="size">6.4 GB</span><p><b>删除后：</b>关闭休眠后无法使用休眠和“快速启动”。这一项只给出操作方法，不会替你删除。</p></div>
+      </div>
+
+      <div class="triple">
+        <div><h3>先进回收站</h3><p>默认移到回收站，随时可以恢复。每次删除都会写进日志，记下删了什么、从哪里删的。</p></div>
+        <div><h3>系统位置不让删</h3><p>Windows、Program Files 这些关键位置受保护，误选了也会被拦下来并说明原因。</p></div>
+        <div><h3>正在用的会跳过</h3><p>被程序占用的文件不硬删，跳过并告诉你是哪几个。</p></div>
+      </div>
+
+      <div class="basket-demo" aria-label="收集篮示例">
+        <b>收集篮</b>
+        <span class="item">旧项目备份</span>
+        <span class="item">Win11_23H2.iso</span>
+        <span class="item">2021 年录屏</span>
+        <span class="sum">3 项 · 21.7 GB</span>
+        <span class="del">删除全部…</span>
+      </div>
+      <p class="lead" style="margin-top: 16px; font-size: 15px">在列表、方块图、重复文件、排行里看到的东西，右键或拖一下就进收集篮，挑好了一次删除。</p>
+    </div>
+  </section>
+
+  <!-- 更多 -->
+  <section class="gutter" id="more">
+    <div class="wrap center">
+      <p class="eyebrow" style="color: var(--cat-app)">还有更多</p>
+      <h2>每一个角落，<br>都替你看过。</h2>
+    </div>
+    <div class="wrap tiles">
+      <div class="tile" style="--tc: var(--cat-app)">
+        <svg viewBox="0 0 16 16" width="30" height="30" aria-hidden="true"><path d="M5.5 5h7v9h-7zM3.5 11.5V2.5h6.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>
+        <h3>重复文件</h3>
+        <p>按大小和内容逐级比对，确认完全相同才算重复。可以只留一份，其余换成硬链接：文件都还在原处，空间只占一份。</p>
+      </div>
+      <div class="tile" style="--tc: var(--cat-media)">
+        <svg viewBox="0 0 16 16" width="30" height="30" aria-hidden="true"><path d="M2 3h12v10H2zM2 11l3.5-3.5 3 3 2-2L14 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>
+        <h3>相似图片</h3>
+        <p>按画面内容找出长得像的照片，缩放过、压缩过的副本也找得到，并排比较后再决定留哪张。</p>
+      </div>
+      <div class="tile" style="--tc: var(--cat-other)">
+        <svg viewBox="0 0 16 16" width="30" height="30" aria-hidden="true"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>
+        <h3>空文件夹与失效链接</h3>
+        <p>空文件夹、空文件，以及指向已经不存在位置的快捷方式和链接，逐个核实后列出来。</p>
+      </div>
+      <div class="tile" style="--tc: var(--cat-dev)">
+        <svg viewBox="0 0 16 16" width="30" height="30" aria-hidden="true"><path d="M3 13.5v-5M8 13.5v-11M13 13.5v-8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"></path></svg>
+        <h3>大文件与排行</h3>
+        <p>最大的文件和很久没打开过的文件，标出修改和访问时间。一年没碰过的大家伙一眼可见。</p>
+      </div>
+      <div class="tile" style="--tc: var(--cat-document)">
+        <svg viewBox="0 0 16 16" width="30" height="30" aria-hidden="true"><path d="M2 4h5v8H2zM9 4h5v8H9zM6 8h4M8.5 6.5 10 8l-1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <h3>移到其他磁盘</h3>
+        <p>把大文件夹搬到另一块磁盘，原位置留下连接点，程序照常找得到它。复制并核对无误后才删除原文件夹。</p>
+      </div>
+      <div class="tile" style="--tc: var(--cat-system)">
+        <svg viewBox="0 0 16 16" width="30" height="30" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5zM2 9h12M11.5 11h.01" fill="none" stroke="currentColor" stroke-width="1.3"></path></svg>
+        <h3>存储详情</h3>
+        <p>页面文件、休眠文件、还原点、WinSxS、更新缓存分项列出，写明是什么、怎样减小，哪些不要碰。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 隐私 -->
+  <section class="alt gutter center" id="privacy">
+    <div class="wrap">
+      <div class="privacy-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="34" height="34"><path d="M7 10.5V8a5 5 0 0 1 10 0v2.5M5.5 10.5h13v9a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path></svg>
+      </div>
+      <h2>你的磁盘，<br>只有你看得到。</h2>
+      <p class="lead">扫描、分析、清理全部在你的电脑上完成。DiskLens <strong>不联网</strong>，不上传文件名，不收集使用数据，也不需要账号。扫描结果和删除日志都存在本机，随时可以删掉。</p>
+    </div>
+  </section>
+
+  <!-- 规格 -->
+  <section class="gutter" id="specs">
+    <div class="wrap">
+      <h2>技术规格</h2>
+      <dl class="specs">
+        <div><dt>系统要求</dt><dd>Windows 10 或 Windows 11，64 位（x64）</dd></div>
+        <div><dt>运行环境</dt><dd>Microsoft Edge WebView2。Windows 11 已自带；缺少时安装程序会自动下载安装。</dd></div>
+        <div><dt>文件系统</dt><dd>NTFS 支持 MFT 直读和 USN 增量刷新；FAT32、exFAT 和网络位置使用普通遍历。</dd></div>
+        <div><dt>权限</dt><dd>普通用户即可使用。以管理员身份运行时启用 MFT 直读，并能读取系统和其他用户的文件夹。</dd></div>
+        <div><dt>安装包</dt><dd>安装程序（.exe）约 2.1 MB，另有 MSI 版本，方便统一部署。</dd></div>
+        <div><dt>界面</dt><dd>简体中文。浅色、深色，或跟随系统。</dd></div>
+        <div><dt>删除方式</dt><dd>默认移到回收站；也可以彻底删除。每次操作写入本机日志。</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- 结尾 -->
+  <section class="band gutter center final" id="get">
+    <div class="wrap">
+      <h2>DiskLens<br>即将发布。</h2>
+      <p class="lead">给 Windows 用的磁盘空间分析工具。看清每一 GB，删得明明白白。</p>
+      <ul class="facts" style="color: var(--band-ink-2)">
+        <li>Windows 10 / 11 · 64 位</li>
+        <li>安装包约 2.1 MB</li>
+        <li>简体中文</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer class="gutter">
+  <div class="wrap">
+    <span>DiskLens for Windows</span>
+    <span>页面中的界面演示和清理数字均为示例，不代表任何真实电脑。</span>
+  </div>
+</footer>
+
+<script>
+  (() => {
+    const GB = 1;
+    // 示例数据：一块 312 GB 的系统盘。cat 与 DiskLens 的七个类别一致；
+    // tags 用于演示搜索：media 音视频、big 大于 10 GB、node 含 node_modules、stale 一年以上没打开。
+    const DATA = [
+      { name: "Users", size: 168, cat: "document", dir: true, kids: [
+        { name: "视频", size: 46, cat: "media", dir: true, tags: ["media", "big"] },
+        { name: "AppData", size: 41, cat: "app", dir: true, tags: ["big"] },
+        { name: "下载", size: 28, cat: "package", dir: true, tags: ["big", "stale"] },
+        { name: "projects", size: 22, cat: "dev", dir: true, tags: ["big", "node"] },
+        { name: "图片", size: 14, cat: "document", dir: true, tags: ["big"] },
+        { name: "文档", size: 9, cat: "document", dir: true, tags: ["stale"] },
+        { name: "音乐", size: 8, cat: "media", dir: true, tags: ["media"] },
+      ] },
+      { name: "Games", size: 54, cat: "app", dir: true, kids: [
+        { name: "Steam", size: 41, cat: "app", dir: true, tags: ["big"] },
+        { name: "Epic Games", size: 13, cat: "app", dir: true, tags: ["big", "stale"] },
+      ] },
+      { name: "Program Files", size: 38, cat: "app", dir: true, kids: [
+        { name: "Adobe", size: 12, cat: "app", dir: true, tags: ["big"] },
+        { name: "JetBrains", size: 9, cat: "dev", dir: true, tags: ["node"] },
+        { name: "其他程序", size: 7, cat: "app", dir: true },
+        { name: "Microsoft Office", size: 6, cat: "app", dir: true },
+        { name: "NVIDIA", size: 4, cat: "app", dir: true },
+      ] },
+      { name: "Windows", size: 26, cat: "system", dir: true, kids: [
+        { name: "WinSxS", size: 9, cat: "system", dir: true },
+        { name: "System32", size: 7, cat: "system", dir: true },
+        { name: "Installer", size: 5, cat: "package", dir: true, tags: ["stale"] },
+        { name: "SoftwareDistribution", size: 3, cat: "package", dir: true },
+        { name: "其他", size: 2, cat: "system", dir: true },
+      ] },
+      { name: "pagefile.sys", size: 16, cat: "system", dir: false, tags: ["big"] },
+      { name: "hiberfil.sys", size: 6, cat: "system", dir: false },
+      { name: "ProgramData", size: 4, cat: "other", dir: true, kids: [
+        { name: "Package Cache", size: 2.5, cat: "package", dir: true, tags: ["stale"] },
+        { name: "其他", size: 1.5, cat: "other", dir: true },
+      ] },
+    ];
+    const TOTAL = DATA.reduce((s, d) => s + d.size, 0);
+    const CATS = [
+      ["system", "系统文件"], ["app", "应用程序"], ["dev", "开发缓存"], ["media", "音视频"],
+      ["package", "安装包与镜像"], ["document", "文档与图片"], ["other", "其他"],
+    ];
+    const QUERIES = {
+      media: "type:音视频", big: "size:>10gb", node: "folder: node_modules", stale: "da:<1y",
+    };
+    const SHADES = [0, 0.32, -0.1, 0.16, 0.46];
+    const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const fmt = (gb) => (gb >= 10 ? gb.toFixed(0) : gb.toFixed(1)) + " GB";
+    const pct = (part, whole) => ((part / whole) * 100).toFixed(1) + "%";
+
+    function css(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function shade(hex, amount) {
+      const m = /^#([0-9a-f]{6})$/i.exec(hex);
+      if (!m || amount === 0) return hex;
+      const n = parseInt(m[1], 16);
+      const target = amount > 0 ? 255 : 0;
+      const t = Math.abs(amount);
+      const mix = (c) => Math.round(c + (target - c) * t);
+      return `rgb(${mix(n >> 16)} ${mix((n >> 8) & 255)} ${mix(n & 255)})`;
+    }
+
+    let palette = null;
+    function readPalette() {
+      palette = {
+        cat: Object.fromEntries(CATS.map(([k]) => [k, css(`--cat-${k}`)])),
+        ink: css("--tile-ink"),
+        muted: css("--tile-muted"),
+        gap: css("--win"),
+        accent: css("--accent"),
+        card: css("--card"),
+        font: getComputedStyle(document.body).fontFamily,
+      };
+    }
+
+    // ---------- 方块图布局（squarified） ----------
+    function squarify(values, box) {
+      const total = values.reduce((a, b) => a + b, 0);
+      const scale = (box.w * box.h) / total;
+      const areas = values.map((v) => v * scale);
+      const out = new Array(values.length);
+      let rect = { ...box };
+      let row = [];
+      const worst = (idx, side) => {
+        const s = idx.reduce((a, i) => a + areas[i], 0);
+        let max = 0, min = Infinity;
+        for (const i of idx) { max = Math.max(max, areas[i]); min = Math.min(min, areas[i]); }
+        return Math.max((side * side * max) / (s * s), (s * s) / (side * side * min));
+      };
+      const place = (idx) => {
+        const s = idx.reduce((a, i) => a + areas[i], 0);
+        if (rect.w >= rect.h) {
+          const w = s / rect.h;
+          let y = rect.y;
+          for (const i of idx) { const h = areas[i] / w; out[i] = { x: rect.x, y, w, h }; y += h; }
+          rect = { x: rect.x + w, y: rect.y, w: rect.w - w, h: rect.h };
+        } else {
+          const h = s / rect.w;
+          let x = rect.x;
+          for (const i of idx) { const w = areas[i] / h; out[i] = { x, y: rect.y, w, h }; x += w; }
+          rect = { x: rect.x, y: rect.y + h, w: rect.w, h: rect.h - h };
+        }
+      };
+      let i = 0;
+      while (i < areas.length) {
+        const side = Math.min(rect.w, rect.h);
+        const next = [...row, i];
+        if (row.length === 0 || worst(next, side) <= worst(row, side)) { row = next; i++; }
+        else { place(row); row = []; }
+      }
+      if (row.length) place(row);
+      return out;
+    }
+
+    // ---------- 演示窗口状态 ----------
+    let folder = null;       // 当前进入的顶层文件夹，null 为 C:\
+    let query = null;        // 当前演示的搜索
+    let hover = -1;
+    let rects = [];
+    let fade = 1;
+
+    const canvas = document.getElementById("treemap");
+    const ctx = canvas.getContext("2d");
+    const rowsEl = document.getElementById("rows");
+    const headEl = document.getElementById("map-head");
+
+    const items = () => (folder ? folder.kids : DATA);
+    const matches = (d) => {
+      if (!query) return true;
+      if (d.kids) return d.kids.some((k) => (k.tags || []).includes(query));
+      return (d.tags || []).includes(query);
+    };
+
+    function layout() {
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      rects = squarify(items().map((d) => d.size), { x: 0, y: 0, w, h });
+    }
+
+    function roundRect(c, x, y, w, h, r) {
+      c.beginPath();
+      if (c.roundRect) c.roundRect(x, y, w, h, r);
+      else c.rect(x, y, w, h);
+    }
+
+    function ellipsize(text, max) {
+      if (ctx.measureText(text).width <= max) return text;
+      let s = text;
+      while (s.length > 1 && ctx.measureText(s + "…").width > max) s = s.slice(0, -1);
+      return s + "…";
+    }
+
+    function draw() {
+      if (!palette) readPalette();
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      ctx.globalAlpha = fade;
+      const list = items();
+      list.forEach((d, i) => {
+        const r = rects[i];
+        if (!r || r.w < 1 || r.h < 1) return;
+        const lit = matches(d);
+        ctx.fillStyle = lit ? shade(palette.cat[d.cat], SHADES[i % SHADES.length]) : palette.muted;
+        const inset = 2;
+        roundRect(ctx, r.x + inset, r.y + inset, r.w - inset * 2, r.h - inset * 2, Math.min(7, r.w / 4, r.h / 4));
+        ctx.fill();
+        if (i === hover) {
+          ctx.fillStyle = "rgb(255 255 255 / 0.25)";
+          ctx.fill();
+        }
+        if (!lit || r.w < 56 || r.h < 30) return;
+        ctx.fillStyle = palette.ink;
+        ctx.textBaseline = "top";
+        ctx.font = `700 12.5px ${palette.font}`;
+        ctx.fillText(ellipsize(d.name, r.w - 18), r.x + 10, r.y + 9);
+        if (r.h > 48) {
+          ctx.globalAlpha = fade * 0.7;
+          ctx.font = `500 12px ${palette.font}`;
+          ctx.fillText(fmt(d.size), r.x + 10, r.y + 27);
+          ctx.globalAlpha = fade;
+        }
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    function animateIn() {
+      if (reduceMotion) { fade = 1; draw(); return; }
+      const start = performance.now();
+      const step = (now) => {
+        fade = Math.min(1, (now - start) / 260);
+        draw();
+        if (fade < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+
+    function renderList() {
+      const list = items();
+      const whole = folder ? folder.size : TOTAL;
+      rowsEl.replaceChildren(...list.map((d, i) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "row" + (matches(d) ? "" : " dim") + (i === hover ? " hot" : "");
+        const icon = d.dir
+          ? `<svg viewBox="0 0 20 16" width="17" height="14" aria-hidden="true"><path d="M1 3a2 2 0 0 1 2-2h4.2l2 2H17a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z" fill="${palette.cat[d.cat]}"></path></svg>`
+          : `<svg viewBox="0 0 16 16" width="14" height="15" aria-hidden="true"><path d="M3.5 1.5h6l3 3v10h-9z" fill="none" stroke="${palette.cat[d.cat]}" stroke-width="1.4" stroke-linejoin="round"></path></svg>`;
+        b.innerHTML = `${icon}<span class="name"></span><span class="num">${fmt(d.size)}</span><span class="num pct">${pct(d.size, whole)}</span>`;
+        b.querySelector(".name").textContent = d.name;
+        b.addEventListener("mouseenter", () => setHover(i));
+        b.addEventListener("mouseleave", () => setHover(-1));
+        b.addEventListener("click", () => open(d));
+        return b;
+      }));
+    }
+
+    function renderHead() {
+      const d = items()[hover];
+      headEl.replaceChildren();
+      if (folder) {
+        const up = document.createElement("button");
+        up.type = "button";
+        up.className = "crumb";
+        up.textContent = "C:\\";
+        up.addEventListener("click", () => open(null));
+        headEl.append(up, "›", Object.assign(document.createElement("strong"), { textContent: folder.name }));
+      }
+      const info = document.createElement("span");
+      info.className = "info";
+      if (d) {
+        const whole = folder ? folder.size : TOTAL;
+        info.innerHTML = `<strong></strong> · ${fmt(d.size)} · ${pct(d.size, whole)}`;
+        info.querySelector("strong").textContent = d.name;
+      } else if (query) {
+        info.textContent = `搜索“${QUERIES[query]}”：有命中项的方块保持原色，其余变灰`;
+      } else {
+        info.textContent = folder ? "Esc 返回上一级" : "点按文件夹放大查看";
+      }
+      headEl.append(info);
+    }
+
+    function renderTitle() {
+      const d = folder;
+      document.getElementById("win-title").textContent = d ? `C:\\${d.name}` : "C:\\";
+      document.getElementById("win-sub").textContent = d
+        ? `${fmt(d.size)} · ${d.kids.length} 项`
+        : "312 GB · 1,204,331 个文件";
+      const q = document.getElementById("win-query");
+      q.className = query ? "q" : "";
+      q.textContent = query ? QUERIES[query] : "搜索，如 size:>1gb ext:iso";
+    }
+
+    function setHover(i) {
+      if (hover === i) return;
+      hover = i;
+      draw();
+      renderHead();
+      [...rowsEl.children].forEach((r, k) => r.classList.toggle("hot", k === i));
+    }
+
+    function open(d) {
+      if (d && !d.kids) return;
+      folder = d;
+      hover = -1;
+      layout();
+      renderList();
+      renderHead();
+      renderTitle();
+      animateIn();
+    }
+
+    function hit(ev) {
+      const b = canvas.getBoundingClientRect();
+      const x = ev.clientX - b.left, y = ev.clientY - b.top;
+      return rects.findIndex((r) => r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+    }
+
+    canvas.addEventListener("mousemove", (ev) => setHover(hit(ev)));
+    canvas.addEventListener("mouseleave", () => setHover(-1));
+    canvas.addEventListener("click", (ev) => {
+      const i = hit(ev);
+      if (i >= 0) open(items()[i]);
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && folder) open(null);
+    });
+
+    document.querySelectorAll(".chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const q = chip.dataset.q;
+        query = query === q ? null : q;
+        document.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.q === query)));
+        renderList();
+        renderHead();
+        renderTitle();
+        draw();
+      });
+    });
+
+    // ---------- 旭日图示例 ----------
+    const sun = document.getElementById("sunburst");
+    const sctx = sun.getContext("2d");
+    function drawSunburst() {
+      const dpr = window.devicePixelRatio || 1;
+      const size = sun.clientWidth;
+      if (!size) return;
+      sun.width = sun.height = Math.round(size * dpr);
+      sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      sctx.clearRect(0, 0, size, size);
+      const c = size / 2;
+      const rings = [[c * 0.3, c * 0.62], [c * 0.64, c * 0.98]];
+      let a = -Math.PI / 2;
+      DATA.forEach((d, i) => {
+        const sweep = (d.size / TOTAL) * Math.PI * 2;
+        const arc = (r0, r1, from, to, color) => {
+          sctx.beginPath();
+          sctx.arc(c, c, r1, from, to);
+          sctx.arc(c, c, r0, to, from, true);
+          sctx.closePath();
+          sctx.fillStyle = color;
+          sctx.fill();
+          sctx.lineWidth = 1.5;
+          sctx.strokeStyle = palette.card;
+          sctx.stroke();
+        };
+        arc(rings[0][0], rings[0][1], a, a + sweep, shade(palette.cat[d.cat], SHADES[i % SHADES.length]));
+        let b = a;
+        (d.kids || []).forEach((k, j) => {
+          const s = (k.size / d.size) * sweep;
+          arc(rings[1][0], rings[1][1], b, b + s, shade(palette.cat[k.cat], SHADES[(j + 1) % SHADES.length]));
+          b += s;
+        });
+        a += sweep;
+      });
+      sctx.fillStyle = css("--ink");
+      sctx.textAlign = "center";
+      sctx.textBaseline = "middle";
+      sctx.font = `900 ${Math.round(size * 0.07)}px ${palette.font}`;
+      sctx.fillText("312 GB", c, c - size * 0.02);
+      sctx.fillStyle = css("--ink-2");
+      sctx.font = `500 ${Math.round(size * 0.035)}px ${palette.font}`;
+      sctx.fillText("C:\\", c, c + size * 0.05);
+    }
+
+    function renderLegend() {
+      document.getElementById("legend").innerHTML = CATS.map(
+        ([k, label]) => `<li><span class="swatch" style="background: var(--cat-${k})"></span>${label}</li>`,
+      ).join("");
+    }
+
+    function repaintAll() {
+      readPalette();
+      layout();
+      renderList();
+      draw();
+      drawSunburst();
+    }
+
+    new ResizeObserver(() => { layout(); draw(); }).observe(canvas);
+    new ResizeObserver(drawSunburst).observe(sun);
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", repaintAll);
+    new MutationObserver(repaintAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(repaintAll);
+
+    readPalette();
+    renderLegend();
+    layout();
+    renderList();
+    renderHead();
+    renderTitle();
+    draw();
+    drawSunburst();
+  })();
+</script>
+</body>
+</html>
