@@ -30,9 +30,9 @@
 
   /** 按原因分组计数，显示在顶部。 */
   const reasons = $derived.by(() => {
-    const counts = new Map<string, number>();
-    for (const d of dirs) counts.set(d.reason, (counts.get(d.reason) ?? 0) + 1);
-    return [...counts].sort((a, b) => b[1] - a[1]);
+    const counts: Record<string, number> = {};
+    for (const d of dirs) counts[d.reason] = (counts[d.reason] ?? 0) + 1;
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   });
 
   async function find(path: string, then: (id: number) => void) {
@@ -92,9 +92,8 @@
   </p>
   {#if elevated === false}
     <p class="muted">
-      最常见的原因是权限不够。以管理员身份运行 DiskLens
-      能读取大多数系统和其他用户的文件夹；扫描整个 NTFS 磁盘时还会改用 MFT
-      直读，不受文件夹权限限制，也更快。
+      最常见的原因是权限不够。以管理员身份运行 DiskLens 能读取大多数系统和其他用户的文件夹；扫描整个
+      NTFS 磁盘时还会改用 MFT 直读，不受文件夹权限限制，也更快。
     </p>
   {:else if elevated}
     <p class="muted">
