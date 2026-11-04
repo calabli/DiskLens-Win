@@ -27,8 +27,8 @@
   /** 第一次拿到建议时按规则设好默认勾选；之后保留用户的选择。 */
   let seeded = false;
 
-  $effect(() => {
-    void version;
+  /** 重新计算建议；也会重新检查哪些程序正在运行。 */
+  function load() {
     cleanSuggestions()
       .then((list) => {
         items = list;
@@ -36,11 +36,20 @@
         const present = new Set(list.map((s) => s.id));
         for (const id of [...picked]) if (!present.has(id)) picked.delete(id);
         if (!seeded) {
-          for (const s of list) if (s.default && s.action !== "guide") picked.add(s.id);
+          for (const s of list) {
+            if (s.default && s.action !== "guide" && !s.running) picked.add(s.id);
+          }
           seeded = true;
         }
+        // 程序开着的项不能勾选。
+        for (const s of list) if (s.running) picked.delete(s.id);
       })
       .catch((e) => (error = String(e)));
+  }
+
+  $effect(() => {
+    void version;
+    load();
   });
 
   const cleanable = $derived((items ?? []).filter((s) => s.action !== "guide"));
@@ -60,6 +69,9 @@
   }
 </script>
 
+<!-- 切回窗口时重新检查：用户可能刚退出了浏览器。 -->
+<svelte:window onfocus={load} />
+
 {#snippet card(s: Suggestion)}
   {@const risk = RISK[s.risk]}
   <article class="card" class:on={picked.has(s.id)}>
@@ -68,6 +80,7 @@
         <input
           type="checkbox"
           checked={picked.has(s.id)}
+          disabled={!!s.running}
           onchange={() => toggle(s.id)}
           aria-label="清理 {s.name}"
         />
@@ -77,6 +90,11 @@
       <span class="size">{formatSize(s.size)}</span>
     </div>
     <p class="desc">{s.description}</p>
+    {#if s.running}
+      <p class="running" role="status">
+        <strong>{s.running} 正在运行。</strong>退出 {s.running} 后切回这里就可以清理；开着时清理，正在用的缓存删不掉，浏览器也可能出错。
+      </p>
+    {/if}
     <p class="effect"><strong>删除后：</strong>{s.effect}</p>
     {#if s.guide}
       <p class="guide"><strong>处理方法：</strong>{s.guide}</p>
@@ -315,6 +333,13 @@
 
   .desc {
     color: var(--ink-2);
+  }
+
+  .running {
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--warn-bg);
+    color: var(--warn);
   }
 
   .guide {

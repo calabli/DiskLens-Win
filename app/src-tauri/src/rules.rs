@@ -1,7 +1,9 @@
 //! 清理建议：按内置规则在当前结果里找出可以清理的位置，确认后清理。
 //!
 //! 规则匹配的位置可能在受保护的文件夹里（例如 `C:\Windows\Temp`），清理时只放行这些位置。
+//! 规则对应的程序（例如浏览器）正在运行时，这条规则暂不清理。
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use dl_clean::Target;
@@ -11,6 +13,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::cleanup::{DeletePlan, DeleteResult, execute, make_plan};
+use crate::processes;
 use crate::scan::AppState;
 
 /// 每条建议最多列出的位置数。
@@ -52,6 +55,25 @@ pub struct Suggestion {
     /// 匹配到的位置数（`locations` 最多列出一部分）。
     count: usize,
     locations: Vec<Location>,
+    /// 对应的程序正在运行时是它的名称，这时不能清理。
+    running: Option<String>,
+}
+
+/// 因为程序正在运行而跳过的规则。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BusyRule {
+    name: String,
+    app: String,
+}
+
+/// 按规则清理前的汇总：要删除的项，以及暂时跳过的规则。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanPlan {
+    #[serde(flatten)]
+    plan: DeletePlan,
+    busy: Vec<BusyRule>,
 }
 
 /// 当前结果中所有可以清理（或需要指引）的项目，按大小从大到小。
@@ -60,6 +82,7 @@ pub fn clean_suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, 
     let scan = state.current()?;
     let t = scan.read();
     let rules = rule_set();
+    let running = processes::running();
     let mut out: Vec<Suggestion> = rules::match_rules(rules, &t, &env)
         .into_iter()
         .map(|m| {
@@ -95,6 +118,7 @@ pub fn clean_suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, 
                         size: t.size(n),
                     })
                     .collect(),
+                running: r.busy(&running).map(str::to_owned),
             }
         })
         .collect();
@@ -102,15 +126,28 @@ pub fn clean_suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, 
     Ok(out)
 }
 
-/// 选中的规则要删除的项，以及它们放行的位置。只给指引的规则不删除任何东西。
-fn selected(t: &FileTree, rule_ids: &[String]) -> (Vec<NodeId>, Vec<String>) {
+/// 选中的规则要删除的项、它们放行的位置，以及因程序正在运行而跳过的规则。
+/// 只给指引的规则不删除任何东西。
+fn selected(
+    t: &FileTree,
+    rule_ids: &[String],
+    running: &HashSet<String>,
+) -> (Vec<NodeId>, Vec<String>, Vec<BusyRule>) {
     let rules = rule_set();
     let matches: Vec<Matched> = rules::match_rules(rules, t, &env);
     let mut ids = Vec::new();
     let mut allowed = Vec::new();
+    let mut busy = Vec::new();
     for m in matches {
         let r = &rules[m.rule];
         if r.action == Action::Guide || !rule_ids.contains(&r.id) {
+            continue;
+        }
+        if let Some(app) = r.busy(running) {
+            busy.push(BusyRule {
+                name: r.name.clone(),
+                app: app.to_owned(),
+            });
             continue;
         }
         allowed.extend(m.nodes.iter().map(|&n| t.path(n)));
@@ -118,19 +155,23 @@ fn selected(t: &FileTree, rule_ids: &[String]) -> (Vec<NodeId>, Vec<String>) {
     }
     ids.sort_unstable();
     ids.dedup();
-    (ids, allowed)
+    (ids, allowed, busy)
 }
 
 /// 按规则清理前的汇总，格式同删除。
 #[tauri::command]
-pub fn plan_clean(rule_ids: Vec<String>, state: State<'_, AppState>) -> Result<DeletePlan, String> {
+pub fn plan_clean(rule_ids: Vec<String>, state: State<'_, AppState>) -> Result<CleanPlan, String> {
     let scan = state.current()?;
     let t = scan.read();
-    let (ids, allowed) = selected(&t, &rule_ids);
-    Ok(make_plan(&t, &ids, &allowed))
+    let (ids, allowed, busy) = selected(&t, &rule_ids, &processes::running());
+    Ok(CleanPlan {
+        plan: make_plan(&t, &ids, &allowed),
+        busy,
+    })
 }
 
-/// 按规则清理。`permanent` 为 false 时移到回收站。
+/// 按规则清理。`permanent` 为 false 时移到回收站。执行前重新检查程序是否在运行，
+/// 确认之后才打开的程序，它的缓存同样跳过。
 #[tauri::command]
 pub async fn clean_rules(
     rule_ids: Vec<String>,
@@ -140,7 +181,7 @@ pub async fn clean_rules(
     let scan = state.current()?;
     let (ids, targets, allowed) = {
         let t = scan.read();
-        let (ids, allowed) = selected(&t, &rule_ids);
+        let (ids, allowed, _) = selected(&t, &rule_ids, &processes::running());
         let targets = ids
             .iter()
             .map(|&id| Target {

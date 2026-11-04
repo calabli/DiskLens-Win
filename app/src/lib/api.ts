@@ -372,12 +372,24 @@ export interface Suggestion {
   size: number;
   count: number;
   locations: { id: number; path: string; size: number }[];
+  /** 对应的程序正在运行时是它的名称（例如 `Chrome`），这时不能清理。 */
+  running: string | null;
+}
+
+/** 因为对应的程序正在运行而暂不清理的规则。 */
+export interface BusyRule {
+  name: string;
+  app: string;
+}
+
+/** 按规则清理前的汇总：格式同删除，另外列出暂不清理的规则。 */
+export interface CleanPlan extends DeletePlan {
+  busy: BusyRule[];
 }
 
 export const cleanSuggestions = () => invoke<Suggestion[]>("clean_suggestions");
 
-/** 按规则清理前的汇总，格式同删除。 */
-export const planClean = (ruleIds: string[]) => invoke<DeletePlan>("plan_clean", { ruleIds });
+export const planClean = (ruleIds: string[]) => invoke<CleanPlan>("plan_clean", { ruleIds });
 
 export const cleanRules = (ruleIds: string[], permanent: boolean) =>
   invoke<DeleteResult>("clean_rules", { ruleIds, permanent });

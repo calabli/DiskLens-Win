@@ -5,6 +5,7 @@ mod commands;
 mod dupes;
 mod files;
 mod findings;
+mod processes;
 mod refresh;
 mod rules;
 mod scan;

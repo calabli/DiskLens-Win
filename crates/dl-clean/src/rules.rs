@@ -54,6 +54,22 @@ pub struct Rule {
     pub dir_names: Vec<String>,
     #[serde(default)]
     pub requires: Vec<String>,
+    /// 用到这些位置的程序名称，例如 `Chrome`；它运行时不清理。
+    #[serde(default)]
+    pub app: Option<String>,
+    /// 这个程序的进程名（例如 `chrome.exe`），不区分大小写。
+    #[serde(default)]
+    pub processes: Vec<String>,
+}
+
+impl Rule {
+    /// 规则对应的程序正在运行时返回它的名称。`running` 是正在运行的进程名，全部小写。
+    pub fn busy(&self, running: &HashSet<String>) -> Option<&str> {
+        self.processes
+            .iter()
+            .any(|p| running.contains(&p.to_lowercase()))
+            .then(|| self.app.as_deref().unwrap_or_default())
+    }
 }
 
 /// 读入并检查规则。
@@ -85,6 +101,9 @@ pub fn parse(yaml: &str) -> Result<Vec<Rule>, String> {
         }
         if r.action == Action::Contents && !r.files.is_empty() {
             return bad("按文件名匹配时不能用 contents");
+        }
+        if r.app.is_some() == r.processes.is_empty() {
+            return bad("app 和 processes 要一起写");
         }
     }
     Ok(rules)
@@ -293,6 +312,32 @@ fn glob(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rule_is_busy_while_its_app_runs() {
+        let rules = builtin();
+        let chrome = rules.iter().find(|r| r.id == "browser-chrome").unwrap();
+        let running: HashSet<String> = ["explorer.exe", "chrome.exe"].map(String::from).into();
+        assert_eq!(chrome.busy(&running), Some("Chrome"));
+        let idle: HashSet<String> = ["explorer.exe".to_string()].into();
+        assert_eq!(chrome.busy(&idle), None);
+        // 没写进程的规则永远不算占用。
+        let temp = rules.iter().find(|r| r.id == "temp-user").unwrap();
+        assert_eq!(temp.busy(&running), None);
+    }
+
+    #[test]
+    fn app_and_processes_go_together() {
+        let yaml = |extra: &str| {
+            format!(
+                "- id: x\n  name: X\n  category: c\n  risk: low\n  description: d\n  effect: e\n  \
+                 action: contents\n  paths: ['C:\\x']\n{extra}"
+            )
+        };
+        assert!(parse(&yaml("  app: X\n  processes: [x.exe]\n")).is_ok());
+        assert!(parse(&yaml("  app: X\n")).is_err());
+        assert!(parse(&yaml("  processes: [x.exe]\n")).is_err());
+    }
 
     #[test]
     fn builtin_rules_are_valid_and_cover_the_spec() {
