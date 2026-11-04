@@ -12,6 +12,10 @@
 #   dir_names  在扫描范围内按目录名查找（不区分大小写），找到后不再往里找
 #   requires   与 dir_names 配合：同一级必须有这些文件之一（可用通配符），避免误判
 #
+# 程序在运行时不清理：
+#   app        用到这些位置的程序名称，显示给用户
+#   processes  它的进程名（不区分大小写）；任何一个在运行，这条规则就暂不清理
+#
 # action：
 #   contents   清空匹配到的目录里的内容，目录本身保留
 #   self       删除匹配到的目录或文件本身
@@ -47,8 +51,10 @@
   risk: low
   default: true
   description: Chrome 为加快打开网页而保存的图片、脚本等副本。
-  effect: 网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。建议先关闭 Chrome。
+  effect: 网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。
   action: contents
+  app: Chrome
+  processes: [chrome.exe]
   paths:
     - '%LOCALAPPDATA%\Google\Chrome\User Data\*\Cache'
     - '%LOCALAPPDATA%\Google\Chrome\User Data\*\Code Cache'
@@ -60,8 +66,10 @@
   risk: low
   default: true
   description: Microsoft Edge 为加快打开网页而保存的图片、脚本等副本。
-  effect: 网页第一次打开会稍慢，登录状态、收藏夹和历史记录不受影响。建议先关闭 Edge。
+  effect: 网页第一次打开会稍慢，登录状态、收藏夹和历史记录不受影响。
   action: contents
+  app: Microsoft Edge
+  processes: [msedge.exe]
   paths:
     - '%LOCALAPPDATA%\Microsoft\Edge\User Data\*\Cache'
     - '%LOCALAPPDATA%\Microsoft\Edge\User Data\*\Code Cache'
@@ -73,8 +81,10 @@
   risk: low
   default: true
   description: Firefox 为加快打开网页而保存的副本。
-  effect: 网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。建议先关闭 Firefox。
+  effect: 网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。
   action: contents
+  app: Firefox
+  processes: [firefox.exe]
   paths: ['%LOCALAPPDATA%\Mozilla\Firefox\Profiles\*\cache2']
 
 # ---------- 更新缓存 ----------

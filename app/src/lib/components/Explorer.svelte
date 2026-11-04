@@ -527,7 +527,14 @@
     try {
       const p = await planClean(ruleIds);
       if (p.items.length === 0) {
-        toast = { message: "所选项目里已经没有可以清理的内容", detail: [], tone: "info" };
+        toast =
+          p.busy.length > 0
+            ? {
+                message: `${[...new Set(p.busy.map((b) => b.app))].join("、")} 正在运行，请先退出再清理`,
+                detail: p.busy.map((b) => b.name),
+                tone: "warn",
+              }
+            : { message: "所选项目里已经没有可以清理的内容", detail: [], tone: "info" };
         return;
       }
       planRules = ruleIds;

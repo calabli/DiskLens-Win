@@ -1,11 +1,12 @@
 <script lang="ts">
   import { fade, fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import type { DeletePlan } from "$lib/api";
+  import type { BusyRule, DeletePlan } from "$lib/api";
   import { formatSize } from "$lib/format";
 
   interface Props {
-    plan: DeletePlan;
+    /** 按规则清理时另外带上因程序正在运行而跳过的规则。 */
+    plan: DeletePlan & { busy?: BusyRule[] };
     busy: boolean;
     onconfirm: (permanent: boolean) => void;
     oncancel: () => void;
@@ -105,6 +106,15 @@
         {/if}
         {#each blocked as item (item.id)}
           <p class="blocked"><strong>{item.name}</strong>：{item.blocked}</p>
+        {/each}
+      </div>
+    {/if}
+    {#if plan.busy?.length}
+      <div class="blocked-list">
+        {#each plan.busy as r (r.name)}
+          <p class="running">
+            <strong>{r.name}</strong>：{r.app} 正在运行，这次先跳过。退出 {r.app} 后再清理。
+          </p>
         {/each}
       </div>
     {/if}
@@ -256,6 +266,14 @@
   .blocked-list {
     max-height: 180px;
     overflow-y: auto;
+  }
+
+  .desc .running {
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--warn-bg);
+    color: var(--warn);
+    text-align: left;
   }
 
   .desc .blocked {
