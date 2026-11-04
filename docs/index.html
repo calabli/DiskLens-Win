@@ -795,6 +795,16 @@
 
   .rule p b { color: var(--ink); font-weight: 500; }
 
+  .rule .running {
+    justify-self: start;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: var(--warn-bg);
+    color: var(--warn);
+  }
+
+  .rule .running b { color: inherit; }
+
   .risk {
     padding: 1px 8px;
     border-radius: 999px;
@@ -1115,7 +1125,7 @@
 
       <div class="suggest" aria-label="清理建议示例">
         <div class="suggest-top"><b>可以释放 19.4 GB</b><span>其中 14.8 GB 是可以放心清理的缓存（示例数据）</span></div>
-        <div class="rule"><input type="checkbox" checked aria-label="Chrome 缓存"><h3>Chrome 缓存 <span class="risk low">低风险</span></h3><span class="size">3.2 GB</span><p><b>删除后：</b>网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。建议先关闭 Chrome。</p></div>
+        <div class="rule"><input type="checkbox" disabled aria-label="Chrome 缓存"><h3>Chrome 缓存 <span class="risk low">低风险</span></h3><span class="size">3.2 GB</span><p class="running"><b>Chrome 正在运行。</b>退出 Chrome 后切回 DiskLens，就可以清理了。</p><p><b>删除后：</b>网页第一次打开会稍慢，登录状态、书签和历史记录不受影响。</p></div>
         <div class="rule"><input type="checkbox" checked aria-label="Windows 更新下载缓存"><h3>Windows 更新下载缓存 <span class="risk low">低风险</span></h3><span class="size">2.6 GB</span><p><b>删除后：</b>如果有更新正在下载或等待安装，可能需要重新下载。</p></div>
         <div class="rule"><input type="checkbox" checked aria-label="node_modules"><h3>node_modules <span class="risk low">低风险</span></h3><span class="size">9.0 GB</span><p><b>删除后：</b>再次运行项目前需要执行 npm install（或 pnpm / yarn install）重新安装。</p></div>
         <div class="rule"><input type="checkbox" aria-label="旧系统备份"><h3>旧系统备份（Windows.old） <span class="risk medium">中风险</span></h3><span class="size">4.6 GB</span><p><b>删除后：</b>无法回退到以前的 Windows 版本。</p></div>
@@ -1125,7 +1135,7 @@
       <div class="triple">
         <div><h3>先进回收站</h3><p>默认移到回收站，随时可以恢复。每次删除都会写进日志，记下删了什么、从哪里删的。</p></div>
         <div><h3>系统位置不让删</h3><p>Windows、Program Files 这些关键位置受保护，误选了也会被拦下来并说明原因。</p></div>
-        <div><h3>正在用的会跳过</h3><p>被程序占用的文件不硬删，跳过并告诉你是哪几个。</p></div>
+        <div><h3>程序开着就不动</h3><p>Chrome、Edge、Firefox 开着时不清理它们的缓存，退出后切回来就能清理。其他被占用的文件也会跳过，并告诉你是哪几个。</p></div>
       </div>
 
       <div class="basket-demo" aria-label="收集篮示例">
