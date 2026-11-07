@@ -119,6 +119,94 @@ export function searchMarks(id: number, query: string, ids: number[]): Promise<n
   return invoke("search_marks", { id, query, ids });
 }
 
+/** 开发项目和它可以删掉的构建产物。 */
+export interface ProjectInfo {
+  id: number;
+  path: string;
+  /** 项目类型，例如 `Node.js`、`Rust`。 */
+  kinds: string[];
+  size: number;
+  /** 删掉构建产物能释放的大小。 */
+  reclaimable: number;
+  /** 构建产物以外最近一次修改的时间（Unix 秒，0 表示不知道）。 */
+  modified: number;
+  artifacts: { id: number; name: string; size: number }[];
+}
+
+/** `id` 子树里的开发项目，按能释放的大小从大到小。 */
+export function devProjects(id: number): Promise<ProjectInfo[]> {
+  return invoke("dev_projects", { id });
+}
+
+/** 变化对比里的一处变化。 */
+export interface ChangeItem {
+  path: string;
+  /** 现在扫描结果里的节点，可以定位；已不在的项为空。 */
+  id: number | null;
+  before: number;
+  after: number;
+  isDir: boolean;
+  status: "new" | "removed" | "changed";
+}
+
+/** 当前结果和对比基准（上一次完整扫描）相比的变化。 */
+export interface Comparison {
+  /** 基准的扫描时间（Unix 毫秒）；还没有基准时为空。 */
+  baseScannedAt: number | null;
+  beforeSize: number;
+  afterSize: number;
+  beforeFiles: number;
+  afterFiles: number;
+  grown: ChangeItem[];
+  shrunk: ChangeItem[];
+}
+
+export function compareScan(): Promise<Comparison> {
+  return invoke("compare_scan");
+}
+
+/** 把当前结果设为对比基准，返回基准时间（Unix 毫秒）。 */
+export function setBaseline(): Promise<number> {
+  return invoke("set_baseline");
+}
+
+/** 清理记录里的一项。 */
+export interface HistoryItem {
+  /** 日志时间（UTC，RFC 3339）。 */
+  time: string;
+  path: string;
+  size: number;
+  result: "deleted" | "linked" | "moved" | "restored" | "blocked" | "failed";
+  reason: string | null;
+  linkTo: string | null;
+  /** 现在的状态；`inBin` 的可以放回原处。 */
+  status: "inBin" | "occupied" | "gone" | "deleted" | "notDone" | "linked" | "moved" | "restored";
+}
+
+/** 一批操作。 */
+export interface HistoryGroup {
+  time: string;
+  action: "recycle" | "delete" | "hardlink" | "move" | "restore";
+  size: number;
+  items: HistoryItem[];
+}
+
+export interface RestoreResult {
+  restored: string[];
+  failed: { path: string; reason: string }[];
+  logError: string | null;
+}
+
+/** 最近的清理记录，从新到旧。 */
+export function cleanupHistory(): Promise<HistoryGroup[]> {
+  return invoke("cleanup_history");
+}
+
+/** 把回收站里的这些项目放回原处。 */
+export function restoreItems(items: { time: string; path: string }[]): Promise<RestoreResult> {
+  return invoke("restore_items", { items });
+}
+
 /** 存储详情：磁盘用量，以及扫描结果里 Windows 自己占用的位置。 */
 export interface StorageDetails {
   volume: Volume | null;

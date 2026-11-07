@@ -1,11 +1,12 @@
-//! 操作日志：每次删除或硬链接替换（包括被拦截和失败的）追加一行 JSON 到按月分的文件里。
+//! 操作日志：每次删除、硬链接替换、移动、从回收站放回（包括被拦截和失败的）追加一行 JSON
+//! 到按月分的文件里。清理记录页面再把它读回来。
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{Mode, Outcome};
 
@@ -39,6 +40,11 @@ impl LogEntry {
         Self::build("move", path, size, outcome, to)
     }
 
+    /// 把回收站里的一项放回原处 `path`。
+    pub fn restored(path: &Path, size: u64, outcome: &Outcome) -> Self {
+        Self::build("restore", path, size, outcome, None)
+    }
+
     /// 把 `path` 替换为指向 `to` 的硬链接。
     pub fn link(path: &Path, to: &Path, size: u64, outcome: &Outcome) -> Self {
         let to = Some(to.to_string_lossy().into_owned());
@@ -56,6 +62,7 @@ impl LogEntry {
             Outcome::Deleted => ("deleted", None),
             Outcome::Linked => ("linked", None),
             Outcome::Moved => ("moved", None),
+            Outcome::Restored => ("restored", None),
             Outcome::Blocked(r) => ("blocked", Some(r.clone())),
             Outcome::Failed(r) => ("failed", Some(r.clone())),
         };
@@ -107,6 +114,80 @@ impl OpLog {
     }
 }
 
+/// 从日志读回的一行。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Record {
+    pub time: String,
+    /// `recycle`、`delete`、`hardlink`、`move`、`restore`。
+    pub action: String,
+    pub path: String,
+    pub size: u64,
+    /// `deleted`、`linked`、`moved`、`restored`、`blocked`、`failed`。
+    pub result: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub link_to: Option<String>,
+}
+
+impl OpLog {
+    /// 最近的至多 `limit` 条记录，从新到旧。读不了的文件和格式不对的行跳过。
+    pub fn read(&self, limit: usize) -> Vec<Record> {
+        let mut files: Vec<PathBuf> = fs::read_dir(&self.dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("operations-") && n.ends_with(".jsonl"))
+            })
+            .collect();
+        // 文件名里的年月按字典序就是时间顺序。
+        files.sort();
+        let mut out = Vec::new();
+        for file in files.iter().rev() {
+            let Ok(text) = fs::read_to_string(file) else {
+                continue;
+            };
+            for line in text.lines().rev() {
+                if let Ok(r) = serde_json::from_str::<Record>(line) {
+                    out.push(r);
+                    if out.len() >= limit {
+                        return out;
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+/// 解析 [`rfc3339`] 写出的时间，得到 Unix 秒。
+pub fn parse_time(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() != 20 || b[4] != b'-' || b[10] != b'T' || b[19] != b'Z' {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, m, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (hh, mm, ss) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    let days = days_from_civil(y, m as u32, d as u32);
+    u64::try_from(days * 86_400 + hh * 3600 + mm * 60 + ss).ok()
+}
+
+/// 公历日期换算成 1970-01-01 起的天数，[`civil_from_days`] 的逆运算。
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = i64::from(if m > 2 { m - 3 } else { m + 9 });
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 /// UTC 时间格式化为 `2026-10-26T13:45:07Z`，不依赖时间库。
 pub fn rfc3339(t: SystemTime) -> String {
     let secs = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -147,6 +228,52 @@ mod tests {
         assert_eq!(rfc3339(t), "2026-10-26T07:33:20Z");
         let leap = UNIX_EPOCH + Duration::from_secs(951_782_400); // 2000-02-29
         assert_eq!(rfc3339(leap), "2000-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn parses_its_own_times() {
+        for secs in [0u64, 951_782_400, 1_793_000_000, 1_793_993_593] {
+            let s = rfc3339(UNIX_EPOCH + Duration::from_secs(secs));
+            assert_eq!(parse_time(&s), Some(secs), "{s}");
+        }
+        assert_eq!(parse_time("2026-10-26 07:33:20"), None);
+    }
+
+    #[test]
+    fn reads_back_newest_first_across_months() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .unwrap()
+            .join("target")
+            .join("test-tmp")
+            .join(format!("dl-clean-log-read-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let line = |t: &str, p: &str| {
+            format!(
+                r#"{{"time":"{t}","action":"recycle","path":"{p}","size":1,"result":"deleted"}}"#
+            )
+        };
+        fs::write(
+            dir.join("operations-2026-10.jsonl"),
+            format!(
+                "{}\n{}\n",
+                line("2026-10-01T00:00:00Z", "a"),
+                line("2026-10-02T00:00:00Z", "b")
+            ),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("operations-2026-11.jsonl"),
+            format!("{}\nnot json\n", line("2026-11-01T00:00:00Z", "c")),
+        )
+        .unwrap();
+        let log = OpLog::new(&dir);
+        let paths: Vec<String> = log.read(10).into_iter().map(|r| r.path).collect();
+        assert_eq!(paths, ["c", "b", "a"]);
+        assert_eq!(log.read(2).len(), 2);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

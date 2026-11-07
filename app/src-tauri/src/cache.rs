@@ -1,17 +1,21 @@
 //! 扫描结果缓存：每次扫描或删除后在后台把文件树存到磁盘，下次启动时立即显示上次的结果。
 //!
 //! 缓存放在 `%LOCALAPPDATA%\DiskLens\cache`，每个扫描路径一个 `.dlscan` 文件（见 dl-snapshot）。
+//! 完整扫描时，原来的 `.dlscan` 先改名为 `.dlbase`，作为变化对比的基准。
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use dl_tree::FileTree;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::scan::{AppState, ScanMode, ScanSummary, Scanned, UnreadableDir};
 
 const EXT: &str = "dlscan";
+/// 变化对比的基准：上一次完整扫描的结果。
+const BASE_EXT: &str = "dlbase";
 
 /// 同一时间只写一个缓存文件，免得两次保存争用同一个临时文件。
 static SAVING: Mutex<()> = Mutex::new(());
@@ -81,6 +85,48 @@ fn cache_path(root: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| "找不到 LOCALAPPDATA 文件夹".to_string())
 }
 
+/// 完整扫描完成、保存新结果之前调用：把 `root` 原来的结果留作变化对比的基准。
+pub fn keep_baseline(root: &str) {
+    let _guard = SAVING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Ok(path) = cache_path(root)
+        && path.exists()
+    {
+        let base = path.with_extension(BASE_EXT);
+        let _ = std::fs::remove_file(&base);
+        if let Err(e) = std::fs::rename(&path, &base) {
+            eprintln!("保留对比基准失败：{e}");
+        }
+    }
+}
+
+/// 把当前结果存为变化对比的基准，基准时间记为现在。返回这个时间（Unix 毫秒）。
+pub fn save_baseline(scan: &Scanned) -> Result<u64, String> {
+    let _guard = SAVING.lock().unwrap_or_else(|e| e.into_inner());
+    let path = cache_path(&scan.summary.root)?.with_extension(BASE_EXT);
+    let tree = scan.read();
+    let mut meta = meta_of(scan, &tree);
+    meta.scanned_at = now_ms();
+    dl_snapshot::save(&path, &meta, &tree).map_err(|e| e.to_string())?;
+    Ok(meta.scanned_at)
+}
+
+/// `root` 的对比基准：（扫描时间，文件修改时间，文件树）。没有基准时为 `None`。
+pub fn load_baseline(root: &str) -> Result<Option<(u64, std::time::SystemTime, FileTree)>, String> {
+    let path = cache_path(root)?.with_extension(BASE_EXT);
+    let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) else {
+        return Ok(None);
+    };
+    let (meta, tree) =
+        dl_snapshot::load::<CacheMeta>(&path).map_err(|e| format!("读取对比基准失败：{e}"))?;
+    Ok(Some((meta.scanned_at, modified, tree)))
+}
+
+/// 对比基准文件的修改时间；用来判断内存里的基准是否还是最新的。
+pub fn baseline_modified(root: &str) -> Option<std::time::SystemTime> {
+    let path = cache_path(root).ok()?.with_extension(BASE_EXT);
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
 /// 在后台线程里把当前结果写入缓存。失败只记录到标准错误，不影响使用。
 pub fn save_in_background(scan: Arc<Scanned>) {
     std::thread::spawn(move || {
@@ -96,8 +142,15 @@ fn save(scan: &Scanned) -> Result<(), String> {
     // 先取日志位置再读树：刷新会先改树再更新位置，这样存下的位置不会比树新。
     let journal = scan.journal();
     let tree = scan.read();
+    let mut meta = meta_of(scan, &tree);
+    meta.journal_id = journal.map(|j| j.id);
+    meta.journal_usn = journal.map(|j| j.next_usn);
+    dl_snapshot::save(&path, &meta, &tree).map_err(|e| e.to_string())
+}
+
+fn meta_of(scan: &Scanned, tree: &FileTree) -> CacheMeta {
     let s = &scan.summary;
-    let meta = CacheMeta {
+    CacheMeta {
         root: s.root.clone(),
         mode: s.mode,
         fallback_reason: s.fallback_reason.clone(),
@@ -107,10 +160,9 @@ fn save(scan: &Scanned) -> Result<(), String> {
         scanned_at: s.scanned_at,
         total_size: tree.size(tree.root()),
         file_count: tree.file_count(tree.root()),
-        journal_id: journal.map(|j| j.id),
-        journal_usn: journal.map(|j| j.next_usn),
-    };
-    dl_snapshot::save(&path, &meta, &tree).map_err(|e| e.to_string())
+        journal_id: None,
+        journal_usn: None,
+    }
 }
 
 fn list(dir: &Path) -> Vec<CachedScan> {
