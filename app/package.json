@@ -1,6 +1,6 @@
 {
   "name": "disklens",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DiskLens: Windows 磁盘空间分析与管理",
   "private": true,
   "type": "module",

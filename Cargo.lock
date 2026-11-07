@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "disklens"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dl-analyze",
  "dl-clean",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "dl-analyze"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dl-tree",
  "dl-walk",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "dl-clean"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dl-tree",
  "serde",
@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "dl-ntfs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dl-tree",
  "dl-walk",
@@ -678,7 +678,7 @@ dependencies = [
 
 [[package]]
 name = "dl-snapshot"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dl-tree",
  "serde",
@@ -688,11 +688,11 @@ dependencies = [
 
 [[package]]
 name = "dl-tree"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "dl-walk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dl-tree",
  "windows-sys 0.61.2",
