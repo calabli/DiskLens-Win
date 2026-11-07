@@ -130,6 +130,16 @@ export interface UpdateInfo {
   /** 发布说明（Markdown 原文）。 */
   notes: string;
   publishedAt: string;
+  /** 安装程序；发布里没有时为空，只能打开发布页手动下载。 */
+  installer: Installer | null;
+}
+
+/** 发布里的安装程序。 */
+export interface Installer {
+  name: string;
+  url: string;
+  size: number;
+  sha256: string | null;
 }
 
 /** 向 GitHub 查询最新发布的版本。只在用户点“检查更新”时调用。 */
@@ -140,6 +150,25 @@ export function checkUpdate(): Promise<UpdateInfo> {
 /** 在浏览器里打开发布页。 */
 export function openReleasePage(url: string): Promise<void> {
   return invoke("open_release_page", { url });
+}
+
+/** 下载安装程序，过程中报告进度；下载完核对大小和 SHA-256，返回文件路径。取消时以“已取消”拒绝。 */
+export function downloadUpdate(
+  installer: Installer,
+  onProgress: (done: number, total: number) => void,
+): Promise<string> {
+  const channel = new Channel<{ done: number; total: number }>();
+  channel.onmessage = (p) => onProgress(p.done, p.total);
+  return invoke("download_update", { installer, onProgress: channel });
+}
+
+export function cancelDownload(): Promise<void> {
+  return invoke("cancel_download");
+}
+
+/** 启动下载好的安装程序，随后 DiskLens 会退出。 */
+export function installUpdate(path: string): Promise<void> {
+  return invoke("install_update", { path });
 }
 
 /** 开发项目和它可以删掉的构建产物。 */
