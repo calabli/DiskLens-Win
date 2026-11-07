@@ -44,6 +44,9 @@
   import MoveDialog from "./MoveDialog.svelte";
   import Rankings from "./Rankings.svelte";
   import Similar from "./Similar.svelte";
+  import CleanupHistory from "./CleanupHistory.svelte";
+  import DevProjects from "./DevProjects.svelte";
+  import ScanChanges from "./ScanChanges.svelte";
   import StorageDetails from "./StorageDetails.svelte";
   import Suggestions from "./Suggestions.svelte";
   import SearchResults from "./SearchResults.svelte";
@@ -65,7 +68,17 @@
   const LAYOUT_KEY = "disklens.panels";
 
   type ChartKind = "treemap" | "sunburst";
-  type View = "browse" | "suggest" | "rank" | "dupes" | "similar" | "findings" | "storage";
+  type View =
+    | "browse"
+    | "suggest"
+    | "rank"
+    | "dupes"
+    | "similar"
+    | "findings"
+    | "storage"
+    | "changes"
+    | "history"
+    | "projects";
 
   /** 左侧边栏的各个页面；图标是 16×16 的描边路径。 */
   const VIEWS: { key: View; label: string; icon: string }[] = [
@@ -92,9 +105,24 @@
       icon: "M1.5 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z",
     },
     {
+      key: "projects",
+      label: "开发项目",
+      icon: "M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4",
+    },
+    {
       key: "storage",
       label: "存储详情",
       icon: "M2 4.5a1.5 1.5 0 0 1 1.5-1.5h9A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5zM2 9h12M11.5 11h.01",
+    },
+    {
+      key: "changes",
+      label: "变化对比",
+      icon: "M5 13V3M2.5 5.5 5 3l2.5 2.5M11 3v10M8.5 10.5 11 13l2.5-2.5",
+    },
+    {
+      key: "history",
+      label: "清理记录",
+      icon: "M8 2a6 6 0 1 1-5.6 3.9M2.2 2.6v3.2h3.2M8 5v3.2l2.2 1.4",
     },
   ];
 
@@ -1122,6 +1150,32 @@
               ondelete={(ids) => askDelete(ids)}
               onbasket={addToBasket}
               onreveal={revealNode}
+              onclose={() => (view = "browse")}
+            />
+          {:else if view === "projects"}
+            <DevProjects
+              rootId={dirId}
+              rootName={title}
+              {version}
+              ondelete={(ids) => askDelete(ids)}
+              onbasket={addToBasket}
+              onreveal={revealNode}
+              onclose={() => (view = "browse")}
+            />
+          {:else if view === "changes"}
+            <ScanChanges {version} onreveal={revealNode} onclose={() => (view = "browse")} />
+          {:else if view === "history"}
+            <CleanupHistory
+              {version}
+              onrestored={() => {
+                if (summary.mode === "mft") refresh(false);
+                else
+                  toast = {
+                    message: "已放回原处。这次扫描是普通遍历，重新扫描后列表里才会出现放回的项目",
+                    detail: [],
+                    tone: "info",
+                  };
+              }}
               onclose={() => (view = "browse")}
             />
           {:else if view === "storage"}

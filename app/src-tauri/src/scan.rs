@@ -248,6 +248,7 @@ pub async fn start_scan(
     let summary = scanned.summary.clone();
     let scanned = Arc::new(scanned);
     *state.scan.lock().expect("state poisoned") = Some(Arc::clone(&scanned));
+    crate::cache::keep_baseline(&summary.root);
     crate::cache::save_in_background(scanned);
     Ok(summary)
 }

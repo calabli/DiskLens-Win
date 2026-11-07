@@ -6,11 +6,13 @@
 //! - [`link`]：用硬链接替换内容相同的文件
 //! - [`relocate`]：把文件夹移到另一个磁盘，原位置留下连接点
 //! - [`log`]：操作日志（JSON Lines）
+//! - [`recycle`]：读取回收站，把删除到回收站的项目放回原处
 
 pub mod delete;
 pub mod link;
 pub mod log;
 pub mod protect;
+pub mod recycle;
 pub mod relocate;
 pub mod rules;
 
@@ -34,6 +36,8 @@ pub enum Outcome {
     Linked,
     /// 已移到另一个磁盘，原位置是连接点。
     Moved,
+    /// 已从回收站放回原处。
+    Restored,
     /// 受保护，没有尝试删除。
     Blocked(String),
     Failed(String),

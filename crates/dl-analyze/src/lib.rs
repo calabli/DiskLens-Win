@@ -5,10 +5,14 @@
 //! - [`dupes`]：重复文件（按大小、部分哈希、全文哈希三步判定）
 //! - [`findings`]：空文件夹、空文件、失效的链接和快捷方式
 //! - [`similar`]：相似图片（感知哈希）
+//! - [`diff`]：两次扫描之间的变化
+//! - [`projects`]：开发项目和它们可以删掉的构建产物
 
 pub mod category;
+pub mod diff;
 pub mod dupes;
 pub mod findings;
+pub mod projects;
 pub mod query;
 pub mod similar;
 pub mod stats;

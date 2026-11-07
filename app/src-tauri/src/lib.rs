@@ -2,10 +2,13 @@ mod admin;
 mod cache;
 mod cleanup;
 mod commands;
+mod compare;
 mod dupes;
 mod files;
 mod findings;
+mod history;
 mod processes;
+mod projects;
 mod refresh;
 mod rules;
 mod scan;
@@ -46,6 +49,11 @@ pub fn run() {
             files::reveal_in_explorer,
             files::open_in_explorer,
             files::owners,
+            compare::compare_scan,
+            compare::set_baseline,
+            history::cleanup_history,
+            projects::dev_projects,
+            history::restore_items,
             rules::clean_suggestions,
             rules::plan_clean,
             rules::clean_rules,
