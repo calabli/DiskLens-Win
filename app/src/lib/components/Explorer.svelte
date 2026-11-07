@@ -53,6 +53,7 @@
   import Sunburst from "./Sunburst.svelte";
   import Toast from "./Toast.svelte";
   import Unreadable from "./Unreadable.svelte";
+  import UpdateCheck from "./UpdateCheck.svelte";
   import Treemap from "./Treemap.svelte";
   import TypeStats from "./TypeStats.svelte";
 
@@ -216,6 +217,8 @@
   let menuOpen = $state(false);
   /** 正在查看读不到的文件夹。 */
   let unreadableOpen = $state(false);
+  /** 正在检查更新。 */
+  let updateOpen = $state(false);
   let theme = $state<ThemeMode>(themeMode());
   const THEMES: { key: ThemeMode; label: string }[] = [
     { key: "system", label: "跟随系统" },
@@ -802,7 +805,14 @@
 
   function onkeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
-    if (["INPUT", "SELECT"].includes(target.tagName) || plan || moving || unreadableOpen) return;
+    if (
+      ["INPUT", "SELECT"].includes(target.tagName) ||
+      plan ||
+      moving ||
+      unreadableOpen ||
+      updateOpen
+    )
+      return;
     if ((menuOpen || ctx) && event.key === "Escape") {
       menuOpen = false;
       ctx = null;
@@ -1013,6 +1023,15 @@
               >{t.label}</button
             >
           {/each}
+          <hr />
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+              menuOpen = false;
+              updateOpen = true;
+            }}>检查更新…</button
+          >
         </div>
       {/if}
     </div>
@@ -1521,6 +1540,10 @@
         : "删除…"}</button
     >
   </div>
+{/if}
+
+{#if updateOpen}
+  <UpdateCheck onclose={() => (updateOpen = false)} />
 {/if}
 
 {#if unreadableOpen}
