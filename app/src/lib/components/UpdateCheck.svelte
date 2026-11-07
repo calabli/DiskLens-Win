@@ -1,7 +1,15 @@
 <script lang="ts">
   import { fade, fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import { checkUpdate, openReleasePage, type UpdateInfo } from "$lib/api";
+  import {
+    cancelDownload,
+    checkUpdate,
+    downloadUpdate,
+    installUpdate,
+    openReleasePage,
+    type UpdateInfo,
+  } from "$lib/api";
+  import { formatSize } from "$lib/format";
 
   interface Props {
     onclose: () => void;
@@ -12,6 +20,12 @@
   let info = $state<UpdateInfo | null>(null);
   let error = $state("");
   let checking = $state(true);
+  /** 下载安装的阶段：还没开始、下载中、正在启动安装程序。 */
+  let phase = $state<"idle" | "downloading" | "installing">("idle");
+  let done = $state(0);
+  let total = $state(0);
+  /** 下载或安装出错（与检查更新的错误分开，出错后还能改为打开下载页）。 */
+  let installError = $state("");
 
   function check() {
     checking = true;
@@ -63,6 +77,26 @@
     return out;
   }
 
+  async function downloadAndInstall() {
+    if (!info?.installer || phase !== "idle") return;
+    installError = "";
+    done = 0;
+    total = info.installer.size;
+    phase = "downloading";
+    try {
+      const path = await downloadUpdate(info.installer, (d, t) => {
+        done = d;
+        total = t;
+      });
+      phase = "installing";
+      // 安装程序启动后 DiskLens 会自己退出。
+      await installUpdate(path);
+    } catch (e) {
+      phase = "idle";
+      if (String(e) !== "已取消") installError = String(e);
+    }
+  }
+
   async function open() {
     if (!info) return;
     try {
@@ -73,19 +107,19 @@
     }
   }
 
+  function close() {
+    if (phase === "downloading") cancelDownload();
+    if (phase !== "installing") onclose();
+  }
+
   function onkeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") onclose();
+    if (event.key === "Escape") close();
   }
 </script>
 
 <svelte:window {onkeydown} />
 
-<div
-  class="backdrop"
-  transition:fade={{ duration: 150 }}
-  role="presentation"
-  onclick={onclose}
-></div>
+<div class="backdrop" transition:fade={{ duration: 150 }} role="presentation" onclick={close}></div>
 <div
   class="sheet"
   role="dialog"
@@ -107,7 +141,24 @@
         ? `，新版本发布于 ${new Date(info.publishedAt).toLocaleDateString("zh-CN")}`
         : ""}。下载安装后会覆盖旧版本，扫描结果和设置都会保留。
     </p>
-    {#if info.notes.trim()}
+    {#if phase !== "idle"}
+      <div class="progress" role="status" aria-live="polite">
+        <div class="bar">
+          <span style:width="{total > 0 ? Math.min(100, (done / total) * 100) : 0}%"></span>
+        </div>
+        <p>
+          {phase === "installing"
+            ? "下载完成，已核对无误，正在启动安装程序…"
+            : `正在下载：${formatSize(done)} / ${formatSize(total)}（${total > 0 ? Math.floor((done / total) * 100) : 0}%）`}
+        </p>
+        {#if phase === "installing"}
+          <p class="muted">
+            安装程序需要管理员权限时，Windows 会弹出确认。DiskLens
+            随后会自动关闭，安装完成后可以从安装程序里直接打开新版本。
+          </p>
+        {/if}
+      </div>
+    {:else if info.notes.trim()}
       <div class="notes">
         {#each blocks(info.notes) as b, i (i)}
           {#if b.kind === "heading"}
@@ -122,6 +173,9 @@
         {/each}
       </div>
     {/if}
+    {#if installError}
+      <p class="error">{installError}</p>
+    {/if}
   {:else if info}
     <h2 id="update-title">已经是最新版本</h2>
     <p class="muted">你现在用的 {info.current} 就是最新发布的版本。</p>
@@ -130,9 +184,20 @@
   <p class="privacy">只有点“检查更新”时，DiskLens 才会访问 GitHub，不会在后台自动联网或下载。</p>
 
   <div class="actions">
-    {#if info?.newer}
+    {#if info?.newer && phase === "downloading"}
+      <button type="button" class="secondary" onclick={() => cancelDownload()}>取消下载</button>
+    {:else if info?.newer && phase === "installing"}
+      <button type="button" class="primary" disabled>正在启动安装程序…</button>
+    {:else if info?.newer && info.installer && !installError}
       <button type="button" class="secondary" onclick={onclose}>以后再说</button>
-      <button type="button" class="primary" onclick={open}>打开下载页</button>
+      <button type="button" class="primary" onclick={downloadAndInstall}
+        >下载并安装（{formatSize(info.installer.size)}）</button
+      >
+    {:else if info?.newer}
+      <button type="button" class="secondary" onclick={open}>打开下载页</button>
+      <button type="button" class="primary" disabled={!info.installer} onclick={downloadAndInstall}
+        >{info.installer ? "重新下载" : "下载并安装"}</button
+      >
     {:else if error}
       <button type="button" class="secondary" onclick={onclose}>关闭</button>
       <button type="button" class="primary" onclick={check}>重试</button>
@@ -192,6 +257,33 @@
 
   .error {
     color: var(--danger);
+  }
+
+  .progress {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .progress p {
+    margin: 0;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--track);
+  }
+
+  .bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.2s;
   }
 
   .notes {
