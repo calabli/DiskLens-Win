@@ -262,6 +262,14 @@ export interface UnreadableDir {
   reason: string;
 }
 
+/**
+ * `ids` 里已经不在扫描结果中的项：自己被删除、在被删除的文件夹里面，或刷新时发现已不存在。
+ * 工具页面在删除或刷新后用它更新结果。
+ */
+export function detached(ids: number[]): Promise<number[]> {
+  return invoke("detached", { ids });
+}
+
 /** 按完整路径找到扫描结果里的节点；找不到时为 `null`。 */
 export function locate(path: string): Promise<number | null> {
   return invoke("locate", { path });
@@ -323,8 +331,35 @@ export const listVolumes = () => invoke<Volume[]>("list_volumes");
 
 export const planDelete = (ids: number[]) => invoke<DeletePlan>("plan_delete", { ids });
 
-export const deleteItems = (ids: number[], permanent: boolean) =>
-  invoke<DeleteResult>("delete_items", { ids, permanent });
+/** 删除进度，删除过程中大约每 0.1 秒推送一次。 */
+export interface DeleteProgress {
+  doneBytes: number;
+  totalBytes: number;
+  /** 彻底删除时逐个文件计数；移到回收站时为 0。 */
+  doneFiles: number;
+  totalFiles: number;
+  /** 正在处理第几项（从 0 开始）和一共几项。 */
+  item: number;
+  items: number;
+  current: string;
+}
+
+function progressChannel(onProgress?: (p: DeleteProgress) => void) {
+  const channel = new Channel<DeleteProgress>();
+  channel.onmessage = (p) => onProgress?.(p);
+  return channel;
+}
+
+export const deleteItems = (
+  ids: number[],
+  permanent: boolean,
+  onProgress?: (p: DeleteProgress) => void,
+) =>
+  invoke<DeleteResult>("delete_items", {
+    ids,
+    permanent,
+    onProgress: progressChannel(onProgress),
+  });
 
 /** 开始扫描。扫描被取消时 Promise 以“已取消”拒绝。 */
 export function startScan(path: string, onEvent: (e: ScanEvent) => void) {
@@ -502,8 +537,16 @@ export const cleanSuggestions = () => invoke<Suggestion[]>("clean_suggestions");
 
 export const planClean = (ruleIds: string[]) => invoke<CleanPlan>("plan_clean", { ruleIds });
 
-export const cleanRules = (ruleIds: string[], permanent: boolean) =>
-  invoke<DeleteResult>("clean_rules", { ruleIds, permanent });
+export const cleanRules = (
+  ruleIds: string[],
+  permanent: boolean,
+  onProgress?: (p: DeleteProgress) => void,
+) =>
+  invoke<DeleteResult>("clean_rules", {
+    ruleIds,
+    permanent,
+    onProgress: progressChannel(onProgress),
+  });
 
 export interface MoveResult {
   /** 原位置现在是连接点，在树上换成了新的节点。 */

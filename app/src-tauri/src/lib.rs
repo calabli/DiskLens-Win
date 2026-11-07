@@ -41,6 +41,7 @@ pub fn run() {
             commands::search,
             commands::search_marks,
             commands::locate,
+            commands::detached,
             storage::storage_details,
             storage::open_storage_settings,
             update::check_update,

@@ -54,6 +54,15 @@ pub fn run(
     run_with(targets, mode, &|p| protector.check(p), log)
 }
 
+/// 删除过程中的进展，见 [`run_progress`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// 开始处理第几项（从 0 开始）。
+    Item(usize),
+    /// 删掉了这么多字节：彻底删除时每个文件报告一次；移到回收站时整项完成后报告一次。
+    Bytes(u64),
+}
+
 /// 同 [`run`]，用 `check` 判断能否删除（返回拦截原因）。清理规则用它放行规则指定的位置。
 pub fn run_with(
     targets: &[Target],
@@ -61,16 +70,37 @@ pub fn run_with(
     check: &dyn Fn(&std::path::Path) -> Option<String>,
     log: &OpLog,
 ) -> (Vec<Outcome>, Option<std::io::Error>) {
+    run_progress(targets, mode, check, log, &mut |_| {})
+}
+
+/// 同 [`run_with`]，删除过程中通过 `progress` 报告进展。
+pub fn run_progress(
+    targets: &[Target],
+    mode: Mode,
+    check: &dyn Fn(&std::path::Path) -> Option<String>,
+    log: &OpLog,
+    progress: &mut dyn FnMut(Step),
+) -> (Vec<Outcome>, Option<std::io::Error>) {
     let mut log_error = None;
     let outcomes = targets
         .iter()
-        .map(|t| {
+        .enumerate()
+        .map(|(i, t)| {
+            progress(Step::Item(i));
             let outcome = match check(&t.path) {
                 Some(reason) => Outcome::Blocked(reason),
-                None => match delete::delete(&t.path, mode) {
-                    Ok(()) => Outcome::Deleted,
-                    Err(e) => Outcome::Failed(e),
-                },
+                None => {
+                    let r = delete::delete_with(&t.path, mode, &mut |b| progress(Step::Bytes(b)));
+                    match r {
+                        Ok(()) => {
+                            if mode == Mode::Recycle {
+                                progress(Step::Bytes(t.size));
+                            }
+                            Outcome::Deleted
+                        }
+                        Err(e) => Outcome::Failed(e),
+                    }
+                }
             };
             if let Err(e) = log.append(&LogEntry::new(&t.path, t.size, mode, &outcome)) {
                 log_error.get_or_insert(e);

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
   import {
+    detached,
     cancelIssues,
     findIssues,
     type Finding,
@@ -11,6 +12,8 @@
   interface Props {
     rootId: number;
     rootName: string;
+    /** 数据版本；删除或刷新后递增，结果里已不在的项随之去掉。 */
+    version: number;
     /** 已经删除的项目，从结果里去掉。 */
     removed: Set<number>;
     ondelete: (ids: number[]) => void;
@@ -20,7 +23,8 @@
     onclose: () => void;
   }
 
-  let { rootId, rootName, removed, ondelete, onbasket, onreveal, onclose }: Props = $props();
+  let { rootId, rootName, version, removed, ondelete, onbasket, onreveal, onclose }: Props =
+    $props();
 
   const SECTIONS: { kind: FindingKind; title: string; note: string }[] = [
     {
@@ -51,11 +55,27 @@
   let done = $state(0);
   let total = $state(0);
   let result = $state<FindResult | null>(null);
+
+  /**
+   * 删除或刷新后已经不在扫描结果里的项：除了 `removed` 里直接删掉的，还有被删除的文件夹里面的、
+   * 被清理规则清空的，以及刷新时发现已不存在的。
+   */
+  let gone = $state(new Set<number>());
+  $effect(() => {
+    void version;
+    const ids = (result?.items ?? []).map((f) => f.id);
+    if (ids.length === 0) return;
+    detached(ids)
+      .then((d) => (gone = new Set(d)))
+      .catch(() => {});
+  });
   let error = $state("");
   const marked = new SvelteSet<number>();
   const expanded = new SvelteSet<FindingKind>();
 
-  const items = $derived((result?.items ?? []).filter((f) => !removed.has(f.id)));
+  const items = $derived(
+    (result?.items ?? []).filter((f) => !removed.has(f.id) && !gone.has(f.id)),
+  );
   const byKind = $derived(
     Object.fromEntries(
       SECTIONS.map((s) => [s.kind, items.filter((f) => f.kind === s.kind)]),

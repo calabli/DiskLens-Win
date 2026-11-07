@@ -12,7 +12,7 @@ use dl_tree::{FileTree, NodeId};
 use serde::Serialize;
 use tauri::State;
 
-use crate::cleanup::{DeletePlan, DeleteResult, execute, make_plan};
+use crate::cleanup::{DeletePlan, DeleteProgress, DeleteResult, execute, make_plan};
 use crate::processes;
 use crate::scan::AppState;
 
@@ -176,6 +176,7 @@ pub fn plan_clean(rule_ids: Vec<String>, state: State<'_, AppState>) -> Result<C
 pub async fn clean_rules(
     rule_ids: Vec<String>,
     permanent: bool,
+    on_progress: tauri::ipc::Channel<DeleteProgress>,
     state: State<'_, AppState>,
 ) -> Result<DeleteResult, String> {
     let scan = state.current()?;
@@ -191,5 +192,5 @@ pub async fn clean_rules(
             .collect();
         (ids, targets, allowed)
     };
-    execute(scan, ids, targets, permanent, allowed).await
+    execute(scan, ids, targets, permanent, allowed, on_progress).await
 }

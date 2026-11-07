@@ -1,18 +1,46 @@
 <script lang="ts">
   import { fade, fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import type { BusyRule, DeletePlan } from "$lib/api";
+  import type { BusyRule, DeletePlan, DeleteProgress } from "$lib/api";
   import { formatSize } from "$lib/format";
 
   interface Props {
     /** 按规则清理时另外带上因程序正在运行而跳过的规则。 */
     plan: DeletePlan & { busy?: BusyRule[] };
     busy: boolean;
+    /** 删除过程中的进度；还没收到第一次推送时为空。 */
+    progress: DeleteProgress | null;
     onconfirm: (permanent: boolean) => void;
     oncancel: () => void;
   }
 
-  let { plan, busy, onconfirm, oncancel }: Props = $props();
+  let { plan, busy, progress, onconfirm, oncancel }: Props = $props();
+
+  /** 删除开始后经过的秒数，让人看得出程序还在工作。 */
+  let elapsed = $state(0);
+  $effect(() => {
+    if (!busy) return;
+    elapsed = 0;
+    const started = Date.now();
+    const timer = setInterval(() => (elapsed = Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  });
+
+  const percent = $derived.by(() => {
+    if (!progress) return 0;
+    if (progress.totalBytes > 0)
+      return Math.min(100, (progress.doneBytes / progress.totalBytes) * 100);
+    return progress.items > 0 ? (progress.item / progress.items) * 100 : 0;
+  });
+
+  const progressText = $derived.by(() => {
+    const time = elapsed > 0 ? ` · 已用 ${elapsed} 秒` : "";
+    if (!progress) return `正在准备…${time}`;
+    if (permanent) {
+      return `正在彻底删除：${formatSize(progress.doneBytes)} / ${formatSize(progress.totalBytes)}，${progress.doneFiles.toLocaleString()} / ${progress.totalFiles.toLocaleString()} 个文件${time}`;
+    }
+    return `正在移到回收站：第 ${progress.item + 1} / ${progress.items} 项${time}`;
+  });
 
   /** 清单最多列出的项数（清理临时文件时可能有成千上万项）。 */
   const MAX_LISTED = 200;
@@ -120,7 +148,15 @@
     {/if}
   </div>
 
-  {#if deletable.length > 0}
+  {#if busy}
+    <div class="progress-box" role="status" aria-live="polite">
+      <div class="bar"><span style:width="{percent}%"></span></div>
+      <p>{progressText}</p>
+      {#if progress?.current}
+        <p class="current" title={progress.current}>{progress.current}</p>
+      {/if}
+    </div>
+  {:else if deletable.length > 0}
     <div class="modes" role="radiogroup" aria-label="删除方式">
       <button
         type="button"
@@ -314,6 +350,44 @@
 
   .ack input {
     accent-color: var(--danger);
+  }
+
+  .progress-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-self: stretch;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .progress-box p {
+    margin: 0;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .progress-box .current {
+    overflow: hidden;
+    color: var(--ink-2);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--track);
+  }
+
+  .bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.2s;
   }
 
   .log {
