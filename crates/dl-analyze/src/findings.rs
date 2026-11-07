@@ -443,21 +443,52 @@ mod tests {
         assert_eq!(got, [(Kind::BrokenLink, "bad".to_string())]);
     }
 
-    /// 用 Windows 自带的 WScript.Shell 建快捷方式，目标路径含中文。
-    #[cfg(windows)]
+    /// 按 MS-SHLLINK 格式拼一个快捷方式：只有文件头和 LinkInfo，目标是 Unicode 本机路径。
+    /// 不依赖 PowerShell 和系统语言，在任何机器上结果都一样。
+    fn lnk_bytes(target: &Path) -> Vec<u8> {
+        let push_u32 = |b: &mut Vec<u8>, v: usize| b.extend_from_slice(&(v as u32).to_le_bytes());
+        let path: Vec<u16> = target.to_string_lossy().encode_utf16().collect();
+
+        // 文件头：大小、CLSID、标志 HasLinkInfo | IsUnicode，其余为 0。
+        let mut b = vec![0u8; 0x4C];
+        b[0] = 0x4C;
+        b[4..20].copy_from_slice(&[
+            0x01, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]);
+        b[0x14] = 0x02 | 0x80;
+
+        // LinkInfo：头 0x24 字节，后面依次是 VolumeID、空的 ANSI 路径和后缀、Unicode 路径和后缀。
+        let volume: [u8; 17] = [0x11, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0x10, 0, 0, 0, 0];
+        let header = 0x24;
+        let ansi_base = header + volume.len();
+        let ansi_suffix = ansi_base + 1;
+        let unicode_base = ansi_suffix + 1;
+        let unicode_suffix = unicode_base + (path.len() + 1) * 2;
+        let size = unicode_suffix + 2;
+        for v in [
+            size,
+            header,
+            1,
+            header,
+            ansi_base,
+            0,
+            ansi_suffix,
+            unicode_base,
+            unicode_suffix,
+        ] {
+            push_u32(&mut b, v);
+        }
+        b.extend_from_slice(&volume);
+        b.extend_from_slice(&[0, 0]);
+        for u in path.iter().copied().chain([0, 0]) {
+            b.extend_from_slice(&u.to_le_bytes());
+        }
+        b
+    }
+
     fn shortcut(lnk: &Path, target: &Path) {
-        let script = format!(
-            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}');$s.TargetPath='{}';$s.Save()",
-            lnk.display(),
-            target.display()
-        );
-        let ok = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .output()
-            .unwrap()
-            .status
-            .success();
-        assert!(ok, "creating shortcut failed");
+        fs::write(lnk, lnk_bytes(target)).unwrap();
     }
 
     #[cfg(windows)]
@@ -479,6 +510,37 @@ mod tests {
         fs::remove_file(t.path("会被删除.txt")).unwrap();
         let got = run(&t.0);
         assert_eq!(got, [(Kind::BrokenShortcut, "坏的.lnk".to_string())]);
+    }
+
+    /// 用 Windows 自带的 WScript.Shell 建一个真实的快捷方式，确认能读出目标。
+    /// 路径只用英文，避免受系统语言影响；PowerShell 或 COM 不可用时跳过并说明原因。
+    #[cfg(windows)]
+    #[test]
+    fn reads_shortcuts_made_by_windows() {
+        let t = TempDir::new("lnk-real");
+        fs::write(t.path("report.docx"), b"doc").unwrap();
+        let lnk = t.path("report.lnk");
+        let script = format!(
+            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}');$s.TargetPath='{}';$s.Save()",
+            lnk.display(),
+            t.path("report.docx").display()
+        );
+        let out = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .unwrap();
+        if !out.status.success() || !lnk.exists() {
+            eprintln!(
+                "跳过：无法用 WScript.Shell 建快捷方式：{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        let bytes = fs::read(&lnk).unwrap();
+        assert_eq!(
+            shortcut_target(&bytes).map(PathBuf::from),
+            Some(t.path("report.docx"))
+        );
     }
 
     #[test]
