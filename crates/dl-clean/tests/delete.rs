@@ -52,6 +52,49 @@ fn permanent_delete_handles_files_and_folders() {
     );
 }
 
+/// 彻底删除逐个文件报告进度，合计等于删掉的文件大小；里面的连接点只删链接，
+/// 不会顺着它删掉别处的文件；里面的只读文件也能删掉。
+#[cfg(windows)]
+#[test]
+fn permanent_delete_reports_progress_and_never_follows_junctions() {
+    use dl_clean::delete::delete_with;
+
+    let tmp = TempDir::new("progress");
+    let outside = tmp.0.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("precious.txt"), b"keep me").unwrap();
+
+    let dir = tmp.0.join("big");
+    fs::create_dir_all(dir.join("a/b")).unwrap();
+    fs::write(dir.join("a/one.bin"), vec![1u8; 1000]).unwrap();
+    fs::write(dir.join("a/b/two.bin"), vec![2u8; 2000]).unwrap();
+    let ro = dir.join("a/b/readonly.bin");
+    fs::write(&ro, vec![3u8; 300]).unwrap();
+    let mut perms = fs::metadata(&ro).unwrap().permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(&ro, perms).unwrap();
+    let ok = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(dir.join("link"))
+        .arg(&outside)
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "mklink /J failed");
+
+    let mut files = 0;
+    let mut bytes = 0;
+    delete_with(&dir, Mode::Permanent, &mut |b| {
+        files += 1;
+        bytes += b;
+    })
+    .unwrap();
+    assert!(!dir.exists());
+    assert_eq!((files, bytes), (3, 3300));
+    assert_eq!(fs::read(outside.join("precious.txt")).unwrap(), b"keep me");
+}
+
 #[test]
 fn run_blocks_protected_items_and_logs_everything() {
     let tmp = TempDir::new("run");

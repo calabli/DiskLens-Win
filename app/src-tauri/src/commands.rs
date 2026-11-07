@@ -444,6 +444,15 @@ pub fn bucket_stats(id: NodeId, state: State<'_, AppState>) -> Result<BucketStat
 }
 
 /// 在目录的整棵子树里搜索，返回最大的 `limit` 项。
+/// `ids` 里已经不在扫描结果中的项：自己被删除，或者在被删除的文件夹里面，或者刷新时发现已不存在。
+/// 各个工具页面在删除或刷新后用它把这些项从结果里去掉。
+#[tauri::command]
+pub fn detached(ids: Vec<NodeId>, state: State<'_, AppState>) -> Result<Vec<NodeId>, String> {
+    let scan = state.current()?;
+    let t = scan.read();
+    Ok(ids.into_iter().filter(|&id| !t.is_attached(id)).collect())
+}
+
 /// 按完整路径找到扫描结果里的节点；不在扫描范围内或已不存在时返回 `None`。
 #[tauri::command]
 pub fn locate(path: String, state: State<'_, AppState>) -> Result<Option<NodeId>, String> {

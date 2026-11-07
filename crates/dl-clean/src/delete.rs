@@ -1,9 +1,12 @@
 //! 删除文件或文件夹。
 //!
-//! Windows 上通过 Shell 的 `IFileOperation`：与资源管理器的删除行为一致，
-//! 能放进回收站，也能处理只读文件和非空文件夹。不弹任何对话框，确认由 DiskLens 自己完成。
-//! 每项删除后检查路径是否真的不在了，以此判断成败。
+//! 移到回收站通过 Shell 的 `IFileOperation`，与资源管理器的行为一致，不弹任何对话框，
+//! 确认由 DiskLens 自己完成。彻底删除时自己逐个删除文件，以便报告进度：连接点和符号链接
+//! 只删链接本身，不进入；只读文件先去掉只读属性再删；最后还删不掉的（例如云盘占位文件）
+//! 再交给 `IFileOperation`。每项删除后检查路径是否真的不在了，以此判断成败。
 
+use std::fs::{self, Metadata};
+use std::io;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,14 +19,105 @@ pub enum Mode {
 
 /// 删除一项。失败时返回给用户看的原因。
 pub fn delete(path: &Path, mode: Mode) -> Result<(), String> {
-    if std::fs::symlink_metadata(path).is_err() {
+    delete_with(path, mode, &mut |_| {})
+}
+
+/// 同 [`delete`]，每删掉一个文件以它的字节数调用一次 `on_file`。
+/// 移到回收站时不逐个报告，由调用方在整项完成后自己计入。
+pub fn delete_with(path: &Path, mode: Mode, on_file: &mut dyn FnMut(u64)) -> Result<(), String> {
+    if fs::symlink_metadata(path).is_err() {
         return Err("文件已不存在".into());
     }
-    sys::delete(path, mode)?;
-    if std::fs::symlink_metadata(path).is_ok() {
+    match mode {
+        Mode::Recycle => sys::delete(path, mode)?,
+        Mode::Permanent => {
+            // 自己删不掉的部分交给系统再试一次；失败原因以系统给出的为准。
+            if remove_all(path, on_file).is_err() && fs::symlink_metadata(path).is_ok() {
+                sys::delete(path, mode)?;
+            }
+        }
+    }
+    if fs::symlink_metadata(path).is_ok() {
         return Err("未能删除，文件可能正被其他程序使用".into());
     }
     Ok(())
+}
+
+/// 删除时要区分的三种项。
+enum Entry {
+    /// 普通文件夹：先删里面的内容。
+    Dir,
+    /// 指向文件夹的连接点或符号链接：只删链接本身。
+    DirLink,
+    /// 文件，以及指向文件的符号链接。
+    File,
+}
+
+#[cfg(windows)]
+fn entry(meta: &Metadata) -> Entry {
+    use std::os::windows::fs::MetadataExt;
+    const DIRECTORY: u32 = 0x10;
+    const REPARSE_POINT: u32 = 0x400;
+    let a = meta.file_attributes();
+    match (a & DIRECTORY != 0, a & REPARSE_POINT != 0) {
+        (true, false) => Entry::Dir,
+        (true, true) => Entry::DirLink,
+        _ => Entry::File,
+    }
+}
+
+#[cfg(not(windows))]
+fn entry(meta: &Metadata) -> Entry {
+    if meta.file_type().is_symlink() {
+        Entry::File
+    } else if meta.is_dir() {
+        Entry::Dir
+    } else {
+        Entry::File
+    }
+}
+
+/// 逐个删除 `path` 和它里面的一切。遇到删不掉的继续删别的，最后返回第一个错误。
+fn remove_all(path: &Path, on_file: &mut dyn FnMut(u64)) -> io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    match entry(&meta) {
+        Entry::Dir => {
+            let mut first = None;
+            for e in fs::read_dir(path)? {
+                if let Err(err) = e.and_then(|e| remove_all(&e.path(), on_file)) {
+                    first.get_or_insert(err);
+                }
+            }
+            if let Some(err) = first {
+                return Err(err);
+            }
+            writable(path, || fs::remove_dir(path))
+        }
+        Entry::DirLink => fs::remove_dir(path),
+        Entry::File => {
+            writable(path, || fs::remove_file(path))?;
+            on_file(meta.len());
+            Ok(())
+        }
+    }
+}
+
+/// 执行 `op`；因为只读而被拒绝时去掉只读属性再试一次。
+fn writable(path: &Path, op: impl Fn() -> io::Result<()>) -> io::Result<()> {
+    match op() {
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            let mut perms = fs::symlink_metadata(path)?.permissions();
+            if !perms.readonly() {
+                return Err(e);
+            }
+            // Windows 上只是清除“只读”属性，不会放宽访问权限。
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            fs::set_permissions(path, perms)?;
+            op()
+        }
+        r => r,
+    }
 }
 
 #[cfg(windows)]

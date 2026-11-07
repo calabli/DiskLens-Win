@@ -1,11 +1,13 @@
 //! 删除、按规则清理和硬链接替换：先给出汇总和拦截原因供确认，确认后执行，并同步更新树。
 
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
-use dl_clean::{Mode, OpLog, Outcome, Protector, Target};
+use dl_clean::{Mode, OpLog, Outcome, Protector, Step, Target};
 use dl_tree::{NodeId, NodeKind};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tauri::ipc::Channel;
 
 use crate::commands::check;
 use crate::scan::AppState;
@@ -41,6 +43,24 @@ pub struct DeletePlan {
     total_files: u64,
     log_dir: String,
 }
+
+/// 删除进度，删除过程中大约每 0.1 秒推送一次。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteProgress {
+    done_bytes: u64,
+    total_bytes: u64,
+    done_files: u64,
+    total_files: u64,
+    /// 正在处理第几项（从 0 开始）和一共几项。
+    item: usize,
+    items: usize,
+    /// 正在处理的项的路径。
+    current: String,
+}
+
+/// 两次推送进度之间至少隔这么久，避免推送太频繁拖慢删除。
+const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,11 +119,12 @@ pub(crate) fn make_plan(t: &dl_tree::FileTree, ids: &[NodeId], allowed: &[String
     }
 }
 
-/// 执行删除。`permanent` 为 false 时移到回收站。
+/// 执行删除。`permanent` 为 false 时移到回收站。删除过程中通过 `on_progress` 推送进度。
 #[tauri::command]
 pub async fn delete_items(
     ids: Vec<NodeId>,
     permanent: bool,
+    on_progress: Channel<DeleteProgress>,
     state: State<'_, AppState>,
 ) -> Result<DeleteResult, String> {
     let scan = state.current()?;
@@ -121,7 +142,7 @@ pub async fn delete_items(
         }
         (ids_out, targets)
     };
-    execute(scan, ids, targets, permanent, Vec::new()).await
+    execute(scan, ids, targets, permanent, Vec::new(), on_progress).await
 }
 
 /// 执行删除并把删掉的项从树上摘除。`allowed` 是清理规则放行的位置。
@@ -131,16 +152,56 @@ pub(crate) async fn execute(
     targets: Vec<Target>,
     permanent: bool,
     allowed: Vec<String>,
+    on_progress: Channel<DeleteProgress>,
 ) -> Result<DeleteResult, String> {
     let mode = if permanent {
         Mode::Permanent
     } else {
         Mode::Recycle
     };
+    let total_files = {
+        let t = scan.read();
+        ids.iter()
+            .map(|&id| match t.kind(id) {
+                NodeKind::Dir => u64::from(t.file_count(id)),
+                NodeKind::File => 1,
+            })
+            .sum()
+    };
 
     let (outcomes, log_error, targets) = tauri::async_runtime::spawn_blocking(move || {
         let check = |p: &std::path::Path| protector().check_allowing(p, &allowed);
-        let (outcomes, log_error) = dl_clean::run_with(&targets, mode, &check, &op_log());
+        let mut p = DeleteProgress {
+            done_bytes: 0,
+            total_bytes: targets.iter().map(|t| t.size).sum(),
+            done_files: 0,
+            total_files,
+            item: 0,
+            items: targets.len(),
+            current: String::new(),
+        };
+        let mut last: Option<Instant> = None;
+        let mut report = |step: Step| {
+            match step {
+                Step::Item(i) => {
+                    p.item = i;
+                    p.current = targets[i].path.to_string_lossy().into_owned();
+                }
+                Step::Bytes(b) => {
+                    p.done_bytes += b;
+                    // 移到回收站时整项报告一次，不按文件计数。
+                    if mode == Mode::Permanent {
+                        p.done_files += 1;
+                    }
+                }
+            }
+            if last.is_none_or(|l| l.elapsed() >= PROGRESS_EVERY) {
+                last = Some(Instant::now());
+                let _ = on_progress.send(p.clone());
+            }
+        };
+        let (outcomes, log_error) =
+            dl_clean::run_progress(&targets, mode, &check, &op_log(), &mut report);
         (outcomes, log_error, targets)
     })
     .await

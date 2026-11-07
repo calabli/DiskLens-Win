@@ -6,6 +6,7 @@
     cleanRules,
     cleanSuggestions,
     deleteItems,
+    detached,
     linkItems,
     listChildren,
     owners as fetchOwners,
@@ -22,6 +23,7 @@
     type BucketStats,
     type ChildList,
     type DeletePlan,
+    type DeleteProgress,
     type LinkGroup,
     type NodeInfo,
     type ScanSummary,
@@ -212,6 +214,8 @@
   /** 确认后按规则清理（这些规则 id），而不是按项目删除。 */
   let planRules = $state<string[] | null>(null);
   let deleting = $state(false);
+  /** 正在删除时的进度。 */
+  let deleteProgress = $state<DeleteProgress | null>(null);
   let toast = $state<{ message: string; detail: string[]; tone: "info" | "warn" } | null>(null);
   let refreshing = $state(false);
   let menuOpen = $state(false);
@@ -332,6 +336,20 @@
     cleanSuggestions()
       .then((list) => {
         reclaimable = list.filter((s) => s.action !== "guide").reduce((sum, s) => sum + s.size, 0);
+      })
+      .catch(() => {});
+  });
+
+  // 删除或刷新后，搜索结果里已经不在的项（包括被删除的文件夹里面的）也要去掉。
+  $effect(() => {
+    void version;
+    const list = untrack(() => hits);
+    if (!list || list.length === 0) return;
+    detached(list.map((h) => h.id))
+      .then((d) => {
+        if (d.length === 0 || !hits) return;
+        const dead = new Set(d);
+        hits = hits.filter((h) => !dead.has(h.id));
       })
       .catch(() => {});
   });
@@ -589,10 +607,12 @@
     if (!plan) return;
     const ids = plan.items.filter((i) => !i.blocked).map((i) => i.id);
     deleting = true;
+    deleteProgress = null;
+    const onProgress = (p: DeleteProgress) => (deleteProgress = p);
     try {
       const result = planRules
-        ? await cleanRules(planRules, permanent)
-        : await deleteItems(ids, permanent);
+        ? await cleanRules(planRules, permanent, onProgress)
+        : await deleteItems(ids, permanent, onProgress);
       const done = result.deleted.length;
       const verb = permanent ? "已彻底删除" : "已移到回收站";
       // 清理临时文件时常有大量正在使用的文件删不掉，只列出前几个。
@@ -1144,6 +1164,7 @@
             <Rankings
               rootId={dirId}
               rootName={title}
+              {version}
               {removed}
               ondelete={(ids) => askDelete(ids)}
               onbasket={addToBasket}
@@ -1154,6 +1175,7 @@
             <Duplicates
               rootId={dirId}
               rootName={title}
+              {version}
               {removed}
               ondelete={(ids) => askDelete(ids)}
               onbasket={addToBasket}
@@ -1165,6 +1187,7 @@
             <Similar
               rootId={dirId}
               rootName={title}
+              {version}
               {removed}
               ondelete={(ids) => askDelete(ids)}
               onbasket={addToBasket}
@@ -1203,6 +1226,7 @@
             <Findings
               rootId={dirId}
               rootName={title}
+              {version}
               {removed}
               ondelete={(ids) => askDelete(ids)}
               onbasket={addToBasket}
@@ -1485,6 +1509,7 @@
   <ConfirmDelete
     {plan}
     busy={deleting}
+    progress={deleteProgress}
     onconfirm={confirmDelete}
     oncancel={() => !deleting && (plan = null)}
   />

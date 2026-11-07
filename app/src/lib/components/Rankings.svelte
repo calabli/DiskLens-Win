@@ -1,12 +1,14 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import { search, type SearchHit } from "$lib/api";
+  import { detached, search, type SearchHit } from "$lib/api";
   import { formatDate, formatSize } from "$lib/format";
 
   interface Props {
     rootId: number;
     rootName: string;
+    /** 数据版本；删除或刷新后递增，结果里已不在的项随之去掉。 */
+    version: number;
     /** 已经删除的项目，从结果里去掉。 */
     removed: Set<number>;
     ondelete: (ids: number[]) => void;
@@ -16,7 +18,8 @@
     onclose: () => void;
   }
 
-  let { rootId, rootName, removed, ondelete, onbasket, onreveal, onclose }: Props = $props();
+  let { rootId, rootName, version, removed, ondelete, onbasket, onreveal, onclose }: Props =
+    $props();
 
   type Mode = "largest" | "unused";
 
@@ -42,13 +45,27 @@
   let by = $state<"da" | "dm">("da");
   let running = $state(false);
   let hits = $state<SearchHit[] | null>(null);
+
+  /**
+   * 删除或刷新后已经不在扫描结果里的项：除了 `removed` 里直接删掉的，还有被删除的文件夹里面的、
+   * 被清理规则清空的，以及刷新时发现已不存在的。
+   */
+  let gone = $state(new Set<number>());
+  $effect(() => {
+    void version;
+    const ids = (hits ?? []).map((h) => h.id);
+    if (ids.length === 0) return;
+    detached(ids)
+      .then((d) => (gone = new Set(d)))
+      .catch(() => {});
+  });
   let error = $state("");
   const marked = new SvelteSet<number>();
 
   const query = $derived(
     ["file:", size, mode === "unused" ? `${by}:<${age}` : ""].filter(Boolean).join(" "),
   );
-  const shown = $derived((hits ?? []).filter((h) => !removed.has(h.id)));
+  const shown = $derived((hits ?? []).filter((h) => !removed.has(h.id) && !gone.has(h.id)));
   const markedSize = $derived(
     shown.filter((h) => marked.has(h.id)).reduce((sum, h) => sum + h.size, 0),
   );

@@ -3,6 +3,7 @@
   import { fade, fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import {
+    detached,
     cancelDuplicates,
     findDuplicates,
     type DupFile,
@@ -17,6 +18,8 @@
     /** 在哪个目录下查找。 */
     rootId: number;
     rootName: string;
+    /** 数据版本；删除或刷新后递增，结果里已不在的项随之去掉。 */
+    version: number;
     /** 已经删除的项目，从结果里去掉。 */
     removed: Set<number>;
     /** 把勾选的文件交给外层确认并删除。 */
@@ -30,7 +33,7 @@
     onclose: () => void;
   }
 
-  let { rootId, rootName, removed, ondelete, onbasket, onlink, onreveal, onclose }: Props =
+  let { rootId, rootName, version, removed, ondelete, onbasket, onlink, onreveal, onclose }: Props =
     $props();
 
   type Keep = "shortest" | "newest" | "oldest";
@@ -55,6 +58,20 @@
   let running = $state(false);
   let progress = $state<DupProgress | null>(null);
   let result = $state<DupResult | null>(null);
+
+  /**
+   * 删除或刷新后已经不在扫描结果里的项：除了 `removed` 里直接删掉的，还有被删除的文件夹里面的、
+   * 被清理规则清空的，以及刷新时发现已不存在的。
+   */
+  let gone = $state(new Set<number>());
+  $effect(() => {
+    void version;
+    const ids = (result?.groups ?? []).flatMap((g) => g.files.map((f) => f.id));
+    if (ids.length === 0) return;
+    detached(ids)
+      .then((d) => (gone = new Set(d)))
+      .catch(() => {});
+  });
   let error = $state("");
   let shown = $state(PAGE);
   /** 勾选（要删除）的文件。 */
@@ -63,7 +80,7 @@
   const groups = $derived.by(() => {
     if (!result) return [];
     return result.groups
-      .map((g) => ({ ...g, files: g.files.filter((f) => !removed.has(f.id)) }))
+      .map((g) => ({ ...g, files: g.files.filter((f) => !removed.has(f.id) && !gone.has(f.id)) }))
       .filter((g) => g.files.length > 1);
   });
   const wasted = $derived(groups.reduce((sum, g) => sum + g.size * (g.files.length - 1), 0));
