@@ -119,6 +119,29 @@ export function searchMarks(id: number, query: string, ids: number[]): Promise<n
   return invoke("search_marks", { id, query, ids });
 }
 
+/** 检查更新的结果。 */
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  /** 最新发布的版本比当前版本新。 */
+  newer: boolean;
+  /** 发布页地址。 */
+  url: string;
+  /** 发布说明（Markdown 原文）。 */
+  notes: string;
+  publishedAt: string;
+}
+
+/** 向 GitHub 查询最新发布的版本。只在用户点“检查更新”时调用。 */
+export function checkUpdate(): Promise<UpdateInfo> {
+  return invoke("check_update");
+}
+
+/** 在浏览器里打开发布页。 */
+export function openReleasePage(url: string): Promise<void> {
+  return invoke("open_release_page", { url });
+}
+
 /** 开发项目和它可以删掉的构建产物。 */
 export interface ProjectInfo {
   id: number;
