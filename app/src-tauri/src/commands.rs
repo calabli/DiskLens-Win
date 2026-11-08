@@ -110,7 +110,7 @@ pub(crate) fn check(tree: &FileTree, id: NodeId) -> Result<(), String> {
     if tree.is_attached(id) {
         Ok(())
     } else {
-        Err("这个项目已不存在，可能已被删除或扫描结果已更新".into())
+        Err(dl_i18n::tr("这个项目已不存在，可能已被删除或扫描结果已更新").into())
     }
 }
 
@@ -406,17 +406,17 @@ pub struct BucketStats {
 #[tauri::command]
 pub fn bucket_stats(id: NodeId, state: State<'_, AppState>) -> Result<BucketStats, String> {
     const AGE: [(&str, Option<&str>); 5] = [
-        ("一周内修改", Some("file: dm:>1w")),
-        ("一个月内", Some("file: dm:<=1w dm:>30d")),
-        ("一年内", Some("file: dm:<=30d dm:>1y")),
-        ("一年以前", Some("file: dm:<=1y")),
-        ("时间未知", None),
+        (dl_i18n::tk("一周内修改"), Some("file: dm:>1w")),
+        (dl_i18n::tk("一个月内"), Some("file: dm:<=1w dm:>30d")),
+        (dl_i18n::tk("一年内"), Some("file: dm:<=30d dm:>1y")),
+        (dl_i18n::tk("一年以前"), Some("file: dm:<=1y")),
+        (dl_i18n::tk("时间未知"), None),
     ];
     const SIZE: [(&str, Option<&str>); 4] = [
-        ("1 GB 以上", Some("file: size:>=1gb")),
+        (dl_i18n::tk("1 GB 以上"), Some("file: size:>=1gb")),
         ("100 MB – 1 GB", Some("file: size:>=100mb size:<1gb")),
         ("1 – 100 MB", Some("file: size:>=1mb size:<100mb")),
-        ("1 MB 以下", Some("file: size:<1mb")),
+        (dl_i18n::tk("1 MB 以下"), Some("file: size:<1mb")),
     ];
     let scan = state.current()?;
     let guard = scan.read();
@@ -444,6 +444,12 @@ pub fn bucket_stats(id: NodeId, state: State<'_, AppState>) -> Result<BucketStat
 }
 
 /// 在目录的整棵子树里搜索，返回最大的 `limit` 项。
+/// 设置界面语言（`zh-CN`、`zh-TW`、`en`），之后的错误提示、清理规则等按这种语言给出。
+#[tauri::command]
+pub fn set_locale(locale: String) {
+    dl_i18n::set_locale(&locale);
+}
+
 /// `ids` 里已经不在扫描结果中的项：自己被删除，或者在被删除的文件夹里面，或者刷新时发现已不存在。
 /// 各个工具页面在删除或刷新后用它把这些项从结果里去掉。
 #[tauri::command]

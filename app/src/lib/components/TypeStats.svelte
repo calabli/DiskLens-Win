@@ -2,6 +2,7 @@
   import type { BucketStat, BucketStats, TypeStat } from "$lib/api";
   import { CATEGORIES } from "$lib/categories";
   import { formatPercent, formatSize } from "$lib/format";
+  import { t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     stats: TypeStat[];
@@ -19,7 +20,7 @@
 </script>
 
 {#snippet bucketList(title: string, rows: BucketStat[])}
-  <h3>{title}</h3>
+  <h3>{t(title)}</h3>
   <ul class="buckets">
     {#each rows as b (b.label)}
       <li>
@@ -28,11 +29,13 @@
           class="row"
           class:on={b.query !== null && filter === b.query}
           disabled={!b.query}
-          title={b.query ? "列出这些文件" : ""}
+          title={b.query ? t("列出这些文件") : ""}
           onclick={() => b.query && onfilter(b.query, true)}
         >
           <span class="label"
-            >{b.label}<span class="files">{b.files.toLocaleString()} 个文件</span></span
+            >{t(b.label)}<span class="files"
+              >{t("{n} 个文件", { n: b.files.toLocaleString() })}</span
+            ></span
           >
           <span class="size"
             >{formatSize(b.size)}<span class="pct">{formatPercent(b.size, bucketTotal)}</span></span
@@ -47,7 +50,7 @@
 {/snippet}
 
 <section class="card" aria-labelledby="types-title">
-  <h2 id="types-title">存储空间</h2>
+  <h2 id="types-title">{t("存储空间")}</h2>
   <p class="total">{formatSize(total)}</p>
 
   <!-- 像 macOS“存储空间”那样的分段胶囊条，每段宽度与该类型的大小成正比。 -->
@@ -56,13 +59,13 @@
       <span
         style:flex-grow={s.size}
         style:background={CATEGORIES[s.key].color}
-        title="{s.label} {formatSize(s.size)}"
+        title="{t(s.label)} {formatSize(s.size)}"
       ></span>
     {/each}
   </div>
 
   {#if stats.length === 0}
-    <p class="muted">没有文件</p>
+    <p class="muted">{t("没有文件")}</p>
   {/if}
   <ul>
     {#each stats as s (s.key)}
@@ -72,13 +75,13 @@
           type="button"
           class="type"
           class:on={filter === q}
-          title="在当前文件夹中筛选这一类；按回车在所有子文件夹中查找"
+          title={t("在当前文件夹中筛选这一类；按回车在所有子文件夹中查找")}
           onclick={() => onfilter(filter === q ? "" : q, false)}
         >
           <span class="dot" style:background={CATEGORIES[s.key].color}></span>
           <span class="label">
-            {s.label}
-            <span class="files">{s.files.toLocaleString()} 个文件</span>
+            {t(s.label)}
+            <span class="files">{t("{n} 个文件", { n: s.files.toLocaleString() })}</span>
           </span>
           <span class="size">
             {formatSize(s.size)}
@@ -91,9 +94,9 @@
 </section>
 
 {#if buckets && (buckets.age.length > 0 || buckets.size.length > 0)}
-  <section class="card more" aria-label="按时间和大小">
-    {@render bucketList("按修改时间", buckets.age)}
-    {@render bucketList("按大小", buckets.size)}
+  <section class="card more" aria-label={t("按时间和大小")}>
+    {@render bucketList(tk("按修改时间"), buckets.age)}
+    {@render bucketList(tk("按大小"), buckets.size)}
   </section>
 {/if}
 

@@ -130,7 +130,7 @@ pub async fn find_similar(
         }
         let report = report.map_err(|e| {
             if e.kind() == std::io::ErrorKind::Interrupted {
-                "已取消".to_string()
+                dl_i18n::tr("已取消").to_string()
             } else {
                 e.to_string()
             }
@@ -194,7 +194,7 @@ pub async fn thumbnail(
         let tree = scan.read();
         check(&tree, id)?;
         if tree.kind(id) != NodeKind::File {
-            return Err("不是文件".into());
+            return Err(dl_i18n::tr("不是文件").into());
         }
         PathBuf::from(tree.path(id))
     };
@@ -203,5 +203,5 @@ pub async fn thumbnail(
         .await
         .map_err(|e| e.to_string())?
         .map(Response::new)
-        .map_err(|e| format!("无法生成预览：{e}"))
+        .map_err(|e| dl_i18n::trf!("无法生成预览：{e}", e = e))
 }

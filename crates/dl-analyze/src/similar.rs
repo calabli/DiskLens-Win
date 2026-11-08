@@ -307,7 +307,10 @@ pub fn find_similar(
             .collect()
     });
     if cancelled.load(Ordering::Relaxed) {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "查找已取消"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            dl_i18n::tr("查找已取消"),
+        ));
     }
     images.sort_by(|a, b| a.path.cmp(&b.path));
 

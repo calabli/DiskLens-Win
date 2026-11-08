@@ -2,6 +2,7 @@
   import type { SearchHit } from "$lib/api";
   import { CATEGORIES } from "$lib/categories";
   import { formatSize } from "$lib/format";
+  import { t } from "$lib/i18n.svelte";
 
   interface Props {
     query: string;
@@ -15,8 +16,8 @@
 
 <div class="results">
   <div class="head">
-    <span>“{query}”：最大的 {hits.length} 项</span>
-    <button type="button" onclick={onclose}>完成</button>
+    <span>{t("“{query}”：最大的 {n} 项", { query, n: hits.length })}</span>
+    <button type="button" onclick={onclose}>{t("完成")}</button>
   </div>
   <ul>
     {#each hits as hit, i (hit.id)}
@@ -31,7 +32,7 @@
         </button>
       </li>
     {:else}
-      <li class="empty">没有找到</li>
+      <li class="empty">{t("没有找到")}</li>
     {/each}
   </ul>
 </div>

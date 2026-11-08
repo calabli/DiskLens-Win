@@ -49,7 +49,7 @@ pub async fn move_folder(
         let t = scan.read();
         check(&t, id)?;
         if t.kind(id) != NodeKind::Dir || t.parent(id).is_none() {
-            return Err("只能移动扫描范围内的文件夹".into());
+            return Err(dl_i18n::tr("只能移动扫描范围内的文件夹").into());
         }
         (PathBuf::from(t.path(id)), t.name(id).to_owned())
     };
@@ -80,7 +80,7 @@ pub async fn move_folder(
             let log_error = log
                 .append(&LogEntry::moved(&src, &dest, size, &outcome))
                 .err()
-                .map(|e| format!("操作日志写入失败：{e}"));
+                .map(|e| dl_i18n::trf!("操作日志写入失败：{e}", e = e));
             (result, log_error)
         })
         .await
@@ -116,7 +116,7 @@ pub fn reveal_in_explorer(id: NodeId, state: State<'_, AppState>) -> Result<(), 
         check(&t, id)?;
         t.path(id)
     };
-    open_explorer(&path, true).map_err(|e| format!("无法打开资源管理器：{e}"))
+    open_explorer(&path, true).map_err(|e| dl_i18n::trf!("无法打开资源管理器：{e}", e = e))
 }
 
 /// 在资源管理器中打开：文件夹打开它本身，文件打开所在文件夹并选中它。
@@ -128,7 +128,7 @@ pub fn open_in_explorer(id: NodeId, state: State<'_, AppState>) -> Result<(), St
         check(&t, id)?;
         (t.path(id), t.kind(id) == NodeKind::Dir)
     };
-    open_explorer(&path, !is_dir).map_err(|e| format!("无法打开资源管理器：{e}"))
+    open_explorer(&path, !is_dir).map_err(|e| dl_i18n::trf!("无法打开资源管理器：{e}", e = e))
 }
 
 /// 各项目的所有者（“域\用户名”或用户名）；查不到的为 `None`。逐个读安全描述符，
@@ -232,5 +232,5 @@ fn open_explorer(path: &str, select: bool) -> std::io::Result<()> {
 
 #[cfg(not(windows))]
 fn open_explorer(_: &str, _: bool) -> std::io::Result<()> {
-    Err(std::io::Error::other("只在 Windows 上支持"))
+    Err(std::io::Error::other(dl_i18n::tr("只在 Windows 上支持")))
 }

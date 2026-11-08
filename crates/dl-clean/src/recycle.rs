@@ -114,12 +114,14 @@ pub fn find<'a>(items: &'a [BinItem], path: &str, time: u64) -> Option<&'a BinIt
 /// 把回收站里的一项放回原处。原来的上级文件夹不在了就先建好；原位置已有同名项目时不覆盖。
 pub fn restore(item: &BinItem) -> Result<(), String> {
     if fs::symlink_metadata(&item.original).is_ok() {
-        return Err("原位置已经有同名的项目，没有覆盖".into());
+        return Err(dl_i18n::tr("原位置已经有同名的项目，没有覆盖").into());
     }
     if let Some(parent) = item.original.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("无法重建原来的文件夹：{e}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| dl_i18n::trf!("无法重建原来的文件夹：{e}", e = e))?;
     }
-    fs::rename(&item.data, &item.original).map_err(|e| format!("无法移回原处：{e}"))?;
+    fs::rename(&item.data, &item.original)
+        .map_err(|e| dl_i18n::trf!("无法移回原处：{e}", e = e))?;
     // 描述文件删不掉也不影响已经放回的内容；回收站里会留下一条打不开的记录。
     let _ = fs::remove_file(&item.info);
     Ok(())

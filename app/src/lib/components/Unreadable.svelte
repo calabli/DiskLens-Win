@@ -2,6 +2,7 @@
   import { fade, fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { isElevated, locate, restartAsAdmin, type UnreadableDir } from "$lib/api";
+  import { t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     /** 扫描的根路径，以管理员身份重新启动后重新扫描它。 */
@@ -35,11 +36,20 @@
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   });
 
+  // 扫描时记下的原因（Rust 侧 scan.rs 的 reason()）原样存在缓存里，显示时再翻译。
+  void [
+    tk("没有访问权限"),
+    tk("正被其他程序占用"),
+    tk("扫描时已经不存在"),
+    tk("设备未就绪"),
+    tk("系统无法访问"),
+  ];
+
   async function find(path: string, then: (id: number) => void) {
     error = "";
     try {
       const id = await locate(path);
-      if (id == null) error = `扫描结果里找不到 ${path}，可能已被删除`;
+      if (id == null) error = t("扫描结果里找不到 {path}，可能已被删除", { path });
       else then(id);
     } catch (e) {
       error = String(e);
@@ -52,7 +62,7 @@
       await restartAsAdmin(root);
     } catch (e) {
       // 在 UAC 提示里取消时不必提示。
-      if (String(e) !== "已取消") error = String(e);
+      if (String(e) !== t("已取消")) error = String(e);
     }
   }
 
@@ -86,24 +96,31 @@
   aria-labelledby="unreadable-title"
   transition:fly={{ y: -24, duration: 220, easing: cubicOut }}
 >
-  <h2 id="unreadable-title">读不到的文件夹（{total.toLocaleString()} 个）</h2>
+  <h2 id="unreadable-title">
+    {t("读不到的文件夹（{n} 个）", { n: total.toLocaleString() })}
+  </h2>
   <p>
-    扫描时打不开这些文件夹，它们里面的文件<strong>没有算进大小</strong>，实际占用会比显示的多。
+    {t("扫描时打不开这些文件夹，它们里面的文件")}<strong>{t("没有算进大小")}</strong>{t(
+      "，实际占用会比显示的多。",
+    )}
   </p>
   {#if elevated === false}
     <p class="muted">
-      最常见的原因是权限不够。以管理员身份运行 DiskLens 能读取大多数系统和其他用户的文件夹；扫描整个
-      NTFS 磁盘时还会改用 MFT 直读，不受文件夹权限限制，也更快。
+      {t(
+        "最常见的原因是权限不够。以管理员身份运行 DiskLens 能读取大多数系统和其他用户的文件夹；扫描整个 NTFS 磁盘时还会改用 MFT 直读，不受文件夹权限限制，也更快。",
+      )}
     </p>
   {:else if elevated}
     <p class="muted">
-      DiskLens 已经以管理员身份运行，这些文件夹仍然打不开，通常是系统专门保护的文件夹，可以忽略。
+      {t(
+        "DiskLens 已经以管理员身份运行，这些文件夹仍然打不开，通常是系统专门保护的文件夹，可以忽略。",
+      )}
     </p>
   {/if}
 
   {#if reasons.length > 1}
     <p class="muted">
-      {reasons.map(([r, n]) => `${r} ${n} 个`).join("，")}
+      {reasons.map(([r, n]) => t("{reason} {n} 个", { reason: t(r), n })).join(t("，"))}
     </p>
   {/if}
 
@@ -112,20 +129,22 @@
       <li>
         <div class="text">
           <span class="path" title={d.path}>{d.path}</span>
-          <span class="reason">{d.reason}</span>
+          <span class="reason">{t(d.reason)}</span>
         </div>
-        <button type="button" class="link" onclick={() => find(d.path, onreveal)}>定位</button>
+        <button type="button" class="link" onclick={() => find(d.path, onreveal)}
+          >{t("定位")}</button
+        >
         <button
           type="button"
           class="link"
-          title="在文件管理器中打开；资源管理器可能会询问是否授予访问权限"
-          onclick={() => find(d.path, onexplore)}>打开</button
+          title={t("在文件管理器中打开；资源管理器可能会询问是否授予访问权限")}
+          onclick={() => find(d.path, onexplore)}>{t("打开")}</button
         >
       </li>
     {/each}
   </ul>
   {#if total > dirs.length}
-    <p class="muted">只列出了前 {dirs.length.toLocaleString()} 个。</p>
+    <p class="muted">{t("只列出了前 {n} 个。", { n: dirs.length.toLocaleString() })}</p>
   {/if}
 
   {#if error}
@@ -134,12 +153,14 @@
 
   <div class="actions">
     <button type="button" class="secondary" onclick={copyAll}
-      >{copied ? "已复制" : "复制全部路径"}</button
+      >{copied ? t("已复制") : t("复制全部路径")}</button
     >
     {#if elevated === false}
-      <button type="button" class="primary" onclick={restart}>以管理员身份重新启动并扫描</button>
+      <button type="button" class="primary" onclick={restart}
+        >{t("以管理员身份重新启动并扫描")}</button
+      >
     {:else}
-      <button type="button" class="primary" onclick={onclose}>好</button>
+      <button type="button" class="primary" onclick={onclose}>{t("好")}</button>
     {/if}
   </div>
 </div>

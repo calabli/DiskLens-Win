@@ -91,7 +91,7 @@ pub fn clean_suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, 
             nodes.sort_by_key(|&n| std::cmp::Reverse(t.size(n)));
             Suggestion {
                 id: r.id.clone(),
-                name: r.name.clone(),
+                name: dl_i18n::tr_owned(&r.name),
                 category: r.category.clone(),
                 risk: match r.risk {
                     Risk::Low => "low",
@@ -99,14 +99,14 @@ pub fn clean_suggestions(state: State<'_, AppState>) -> Result<Vec<Suggestion>, 
                     Risk::High => "high",
                 },
                 default: r.default,
-                description: r.description.clone(),
-                effect: r.effect.clone(),
+                description: dl_i18n::tr_owned(&r.description),
+                effect: dl_i18n::tr_owned(&r.effect),
                 action: match r.action {
                     Action::Contents => "contents",
                     Action::Remove => "self",
                     Action::Guide => "guide",
                 },
-                guide: r.guide.clone(),
+                guide: r.guide.as_deref().map(dl_i18n::tr_owned),
                 size: m.size,
                 count: m.nodes.len(),
                 locations: nodes
@@ -145,7 +145,7 @@ fn selected(
         }
         if let Some(app) = r.busy(running) {
             busy.push(BusyRule {
-                name: r.name.clone(),
+                name: dl_i18n::tr_owned(&r.name),
                 app: app.to_owned(),
             });
             continue;

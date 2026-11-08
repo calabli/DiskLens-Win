@@ -17,7 +17,10 @@ const MAGIC: &[u8; 4] = b"DLTR";
 const VERSION: u32 = 3;
 
 fn invalid(msg: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, format!("文件树数据损坏：{msg}"))
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        dl_i18n::trf!("文件树数据损坏：{msg}", msg = msg),
+    )
 }
 
 fn write_u32s(w: &mut impl Write, v: &[u32]) -> io::Result<()> {
@@ -103,16 +106,16 @@ impl FileTree {
         let mut magic = [0; 4];
         r.read_exact(&mut magic)?;
         if &magic != MAGIC {
-            return Err(invalid("文件头不对"));
+            return Err(invalid(dl_i18n::tr("文件头不对")));
         }
         let version = read_u32(r)?;
         if !(1..=VERSION).contains(&version) {
-            return Err(invalid("版本不支持"));
+            return Err(invalid(dl_i18n::tr("版本不支持")));
         }
         let n = read_u32(r)? as usize;
         let names_len = read_u32(r)? as usize;
         if n == 0 || n == NONE as usize {
-            return Err(invalid("节点数不对"));
+            return Err(invalid(dl_i18n::tr("节点数不对")));
         }
 
         let parent = read_u32s(r, n)?;
@@ -123,7 +126,7 @@ impl FileTree {
             .map(|b| match b {
                 0 => Ok(NodeKind::Dir),
                 1 => Ok(NodeKind::File),
-                _ => Err(invalid("节点类型不对")),
+                _ => Err(invalid(dl_i18n::tr("节点类型不对"))),
             })
             .collect::<io::Result<Vec<_>>>()?;
         let size = read_u64s(r, n)?;
@@ -137,7 +140,7 @@ impl FileTree {
             .map(|c| u16::from_le_bytes(*c))
             .collect();
         let names = String::from_utf8(read_bytes(r, names_len)?)
-            .map_err(|_| invalid("名称不是有效的 UTF-8"))?;
+            .map_err(|_| invalid(dl_i18n::tr("名称不是有效的 UTF-8")))?;
         let mut flag = [0u8; 1];
         let keys = if version >= 2 && {
             r.read_exact(&mut flag)?;
@@ -185,7 +188,7 @@ impl FileTree {
                 && in_range(self.first_child[i])
                 && in_range(self.next_sibling[i]))
             {
-                return Err(invalid("节点编号越界"));
+                return Err(invalid(dl_i18n::tr("节点编号越界")));
             }
             let start = self.name_start[i] as usize;
             let end = start + self.name_len[i] as usize;
@@ -193,11 +196,11 @@ impl FileTree {
                 || !self.names.is_char_boundary(start)
                 || !self.names.is_char_boundary(end)
             {
-                return Err(invalid("名称位置不对"));
+                return Err(invalid(dl_i18n::tr("名称位置不对")));
             }
         }
         if self.parent[0] != NONE || self.kind[0] != NodeKind::Dir {
-            return Err(invalid("根节点不对"));
+            return Err(invalid(dl_i18n::tr("根节点不对")));
         }
 
         let mut seen = vec![false; n];
@@ -206,12 +209,12 @@ impl FileTree {
         while let Some(dir) = stack.pop() {
             let mut child = self.first_child[dir as usize];
             if child != NONE && self.kind[dir as usize] != NodeKind::Dir {
-                return Err(invalid("文件下面挂着子节点"));
+                return Err(invalid(dl_i18n::tr("文件下面挂着子节点")));
             }
             while child != NONE {
                 let c = child as usize;
                 if seen[c] || self.parent[c] != dir {
-                    return Err(invalid("节点链接不对"));
+                    return Err(invalid(dl_i18n::tr("节点链接不对")));
                 }
                 seen[c] = true;
                 stack.push(child);

@@ -74,36 +74,37 @@ impl Rule {
 
 /// 读入并检查规则。
 pub fn parse(yaml: &str) -> Result<Vec<Rule>, String> {
-    let rules: Vec<Rule> = serde_yaml::from_str(yaml).map_err(|e| format!("规则格式不对：{e}"))?;
+    let rules: Vec<Rule> =
+        serde_yaml::from_str(yaml).map_err(|e| dl_i18n::trf!("规则格式不对：{e}", e = e))?;
     let mut ids = HashSet::new();
     for r in &rules {
-        let bad = |msg: &str| Err(format!("规则 {}：{msg}", r.id));
+        let bad = |msg: &str| Err(dl_i18n::trf!("规则 {r}：{msg}", r = r.id, msg = msg));
         if !ids.insert(r.id.as_str()) {
-            return bad("id 重复");
+            return bad(dl_i18n::tr("id 重复"));
         }
         if r.risk == Risk::High && r.action != Action::Guide {
-            return bad("高风险规则只能给出指引（action: guide）");
+            return bad(dl_i18n::tr("高风险规则只能给出指引（action: guide）"));
         }
         if r.default && (r.risk != Risk::Low || r.action == Action::Guide) {
-            return bad("只有可以直接清理的低风险规则才能默认勾选");
+            return bad(dl_i18n::tr("只有可以直接清理的低风险规则才能默认勾选"));
         }
         if (r.action == Action::Guide) != r.guide.is_some() {
-            return bad("action 为 guide 时必须、且只有这时才写 guide");
+            return bad(dl_i18n::tr("action 为 guide 时必须、且只有这时才写 guide"));
         }
         if r.paths.is_empty() == r.dir_names.is_empty() {
-            return bad("paths 和 dir_names 必须有且只有一个");
+            return bad(dl_i18n::tr("paths 和 dir_names 必须有且只有一个"));
         }
         if !r.files.is_empty() && r.paths.is_empty() {
-            return bad("files 要和 paths 一起用");
+            return bad(dl_i18n::tr("files 要和 paths 一起用"));
         }
         if !r.requires.is_empty() && r.dir_names.is_empty() {
-            return bad("requires 要和 dir_names 一起用");
+            return bad(dl_i18n::tr("requires 要和 dir_names 一起用"));
         }
         if r.action == Action::Contents && !r.files.is_empty() {
-            return bad("按文件名匹配时不能用 contents");
+            return bad(dl_i18n::tr("按文件名匹配时不能用 contents"));
         }
         if r.app.is_some() == r.processes.is_empty() {
-            return bad("app 和 processes 要一起写");
+            return bad(dl_i18n::tr("app 和 processes 要一起写"));
         }
     }
     Ok(rules)

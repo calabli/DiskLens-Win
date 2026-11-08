@@ -46,7 +46,8 @@ pub fn move_with_junction(
 
     // 第 2 步：改名。失败说明有文件正被使用。
     let old = sibling(src, "dl-moving");
-    fs::rename(src, &old).map_err(|e| format!("文件夹里有文件正被使用，没有做任何改动（{e}）"))?;
+    fs::rename(src, &old)
+        .map_err(|e| dl_i18n::trf!("文件夹里有文件正被使用，没有做任何改动（{e}）", e = e))?;
 
     let result = copy_verify_link(&old, src, dest, &survey, progress);
     if let Err(e) = result {
@@ -58,9 +59,11 @@ pub fn move_with_junction(
         let _ = remove_tree(dest);
         return Err(match restored {
             Ok(()) => e,
-            Err(r) => format!(
-                "{e}；而且没能把原文件夹改回原名，它现在在 {}（{r}）",
-                old.display()
+            Err(r) => dl_i18n::trf!(
+                "{e}；而且没能把原文件夹改回原名，它现在在 {old}（{r}）",
+                old = old.display(),
+                e = e,
+                r = r
             ),
         });
     }
@@ -75,29 +78,34 @@ pub fn move_with_junction(
 
 /// 第 1 步：检查能不能移动，并列出源文件夹的内容。
 fn check(src: &Path, dest: &Path) -> Result<Survey, String> {
-    let meta = fs::symlink_metadata(src).map_err(|e| format!("无法读取源文件夹：{e}"))?;
+    let meta =
+        fs::symlink_metadata(src).map_err(|e| dl_i18n::trf!("无法读取源文件夹：{e}", e = e))?;
     if meta.is_symlink() || !meta.is_dir() {
-        return Err("只能移动普通文件夹（不能是链接或文件）".into());
+        return Err(dl_i18n::tr("只能移动普通文件夹（不能是链接或文件）").into());
     }
     let (Some(from), Some(to)) = (drive(src), drive(dest)) else {
-        return Err("源和目标都必须是本机磁盘上的完整路径".into());
+        return Err(dl_i18n::tr("源和目标都必须是本机磁盘上的完整路径").into());
     };
     if src.parent().is_none() {
-        return Err("不能移动整个磁盘".into());
+        return Err(dl_i18n::tr("不能移动整个磁盘").into());
     }
     if from == to {
-        return Err("目标在同一个磁盘上，移动不会释放空间".into());
+        return Err(dl_i18n::tr("目标在同一个磁盘上，移动不会释放空间").into());
     }
     if fs::symlink_metadata(dest).is_ok() {
-        return Err(format!("目标位置已经存在：{}", dest.display()));
+        return Err(dl_i18n::trf!(
+            "目标位置已经存在：{dest}",
+            dest = dest.display()
+        ));
     }
     let survey = survey(src)?;
-    let free = sys::free_space(dest).map_err(|e| format!("无法读取目标磁盘的可用空间：{e}"))?;
+    let free = sys::free_space(dest)
+        .map_err(|e| dl_i18n::trf!("无法读取目标磁盘的可用空间：{e}", e = e))?;
     if free < survey.bytes + HEADROOM {
-        return Err(format!(
-            "目标磁盘空间不足：需要约 {} MB，只有 {} MB",
-            (survey.bytes + HEADROOM) >> 20,
-            free >> 20
+        return Err(dl_i18n::trf!(
+            "目标磁盘空间不足：需要约 {v} MB，只有 {free} MB",
+            v = (survey.bytes + HEADROOM) >> 20,
+            free = free >> 20
         ));
     }
     Ok(survey)
@@ -112,15 +120,15 @@ fn survey(root: &Path) -> Result<Survey, String> {
     let mut stack = vec![PathBuf::new()];
     while let Some(rel) = stack.pop() {
         let entries = fs::read_dir(root.join(&rel))
-            .map_err(|e| format!("无法读取 {}：{e}", rel.display()))?;
+            .map_err(|e| dl_i18n::trf!("无法读取 {rel}：{e}", rel = rel.display(), e = e))?;
         for entry in entries {
             let entry = entry.map_err(|e| e.to_string())?;
             let meta = entry.metadata().map_err(|e| e.to_string())?;
             let path = rel.join(entry.file_name());
             if meta.is_symlink() {
-                return Err(format!(
-                    "文件夹里有链接或连接点（{}），暂不支持移动",
-                    path.display()
+                return Err(dl_i18n::trf!(
+                    "文件夹里有链接或连接点（{path}），暂不支持移动",
+                    path = path.display()
                 ));
             }
             if meta.is_dir() {
@@ -143,34 +151,35 @@ fn copy_verify_link(
     expected: &Survey,
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Result<(), String> {
-    fs::create_dir_all(dest).map_err(|e| format!("无法创建目标文件夹：{e}"))?;
+    fs::create_dir_all(dest).map_err(|e| dl_i18n::trf!("无法创建目标文件夹：{e}", e = e))?;
     for d in &expected.dirs {
-        fs::create_dir_all(dest.join(d)).map_err(|e| format!("无法创建 {}：{e}", d.display()))?;
+        fs::create_dir_all(dest.join(d))
+            .map_err(|e| dl_i18n::trf!("无法创建 {d}：{e}", d = d.display(), e = e))?;
     }
     let mut copied = 0;
     if !progress(0, expected.bytes) {
-        return Err("已取消".into());
+        return Err(dl_i18n::tr("已取消").into());
     }
     for (rel, &size) in &expected.files {
         fs::copy(from.join(rel), dest.join(rel))
-            .map_err(|e| format!("复制 {} 失败：{e}", rel.display()))?;
+            .map_err(|e| dl_i18n::trf!("复制 {rel} 失败：{e}", rel = rel.display(), e = e))?;
         copied += size;
         if !progress(copied, expected.bytes) {
-            return Err("已取消".into());
+            return Err(dl_i18n::tr("已取消").into());
         }
     }
 
     // 核对：每个文件都在、大小一致，没有多出来的文件。
     let copy = survey(dest)?;
     if copy.files != expected.files {
-        return Err("复制后核对不一致，已撤回".into());
+        return Err(dl_i18n::tr("复制后核对不一致，已撤回").into());
     }
 
-    make_junction(link, dest).map_err(|e| format!("无法建立连接点：{e}"))?;
+    make_junction(link, dest).map_err(|e| dl_i18n::trf!("无法建立连接点：{e}", e = e))?;
     let opened = fs::read_dir(link).map(|d| d.count()).ok();
     let listed = fs::read_dir(dest).map(|d| d.count()).ok();
     if opened.is_none() || opened != listed {
-        return Err("连接点建立后无法正常打开，已撤回".into());
+        return Err(dl_i18n::tr("连接点建立后无法正常打开，已撤回").into());
     }
     Ok(())
 }
@@ -261,7 +270,7 @@ mod sys {
         let sub_bytes = substitute.len() * 2;
         let print_bytes = print.len() * 2;
         let data_len = 8 + sub_bytes + 2 + print_bytes + 2;
-        let too_long = || io::Error::new(io::ErrorKind::InvalidInput, "路径太长");
+        let too_long = || io::Error::new(io::ErrorKind::InvalidInput, dl_i18n::tr("路径太长"));
         let u16_of = |n: usize| u16::try_from(n).map_err(|_| too_long());
 
         let mut buf = Vec::with_capacity(8 + data_len);
@@ -303,7 +312,7 @@ mod sys {
         while !dir.exists() {
             dir = dir
                 .parent()
-                .ok_or_else(|| io::Error::other("找不到目标磁盘"))?;
+                .ok_or_else(|| io::Error::other(dl_i18n::tr("找不到目标磁盘")))?;
         }
         let wide: Vec<u16> = dir.as_os_str().encode_wide().chain([0]).collect();
         let mut free = 0u64;

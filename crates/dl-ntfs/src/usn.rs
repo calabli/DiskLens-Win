@@ -459,10 +459,12 @@ mod win {
     pub fn read_journal(volume: &File, since: JournalPos) -> Result<(Vec<UsnRecord>, JournalPos)> {
         let (now, first_usn) = query_journal(volume)?;
         if now.id != since.id {
-            return Err(Error::Journal("日志已被重建".into()));
+            return Err(Error::Journal(dl_i18n::tr("日志已被重建").into()));
         }
         if since.next_usn < first_usn {
-            return Err(Error::Journal("变化太多，较早的日志已被覆盖".into()));
+            return Err(Error::Journal(
+                dl_i18n::tr("变化太多，较早的日志已被覆盖").into(),
+            ));
         }
 
         let mut records = Vec::new();

@@ -611,6 +611,7 @@ version = "0.1.2"
 dependencies = [
  "dl-analyze",
  "dl-clean",
+ "dl-i18n",
  "dl-ntfs",
  "dl-snapshot",
  "dl-tree",
@@ -650,6 +651,7 @@ dependencies = [
 name = "dl-analyze"
 version = "0.1.2"
 dependencies = [
+ "dl-i18n",
  "dl-tree",
  "dl-walk",
  "image",
@@ -661,6 +663,7 @@ dependencies = [
 name = "dl-clean"
 version = "0.1.2"
 dependencies = [
+ "dl-i18n",
  "dl-tree",
  "serde",
  "serde_json",
@@ -669,9 +672,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-i18n"
+version = "0.1.2"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "dl-ntfs"
 version = "0.1.2"
 dependencies = [
+ "dl-i18n",
  "dl-tree",
  "dl-walk",
  "windows-sys 0.61.2",
@@ -681,6 +692,7 @@ dependencies = [
 name = "dl-snapshot"
 version = "0.1.2"
 dependencies = [
+ "dl-i18n",
  "dl-tree",
  "serde",
  "serde_json",
@@ -690,11 +702,15 @@ dependencies = [
 [[package]]
 name = "dl-tree"
 version = "0.1.2"
+dependencies = [
+ "dl-i18n",
+]
 
 [[package]]
 name = "dl-walk"
 version = "0.1.2"
 dependencies = [
+ "dl-i18n",
  "dl-tree",
  "windows-sys 0.61.2",
 ]

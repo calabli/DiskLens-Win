@@ -4,6 +4,7 @@
   import { assignShades, litTiles, resolvePalette, type Palette } from "$lib/categories";
   import { formatSize } from "$lib/format";
   import { onThemeChange } from "$lib/theme";
+  import { t } from "$lib/i18n.svelte";
 
   interface Props {
     dirId: number;
@@ -455,7 +456,7 @@
   {#if error}
     <p class="note error" role="alert">{error}</p>
   {:else if rects.length === 0 && width > 0 && loadedDir === dirId}
-    <p class="note">这个文件夹是空的</p>
+    <p class="note">{t("这个文件夹是空的")}</p>
   {/if}
 </div>
 

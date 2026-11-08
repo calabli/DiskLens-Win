@@ -297,7 +297,10 @@ fn run(
     });
 
     if cancelled.into_inner() {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "扫描已取消"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            dl_i18n::tr("扫描已取消"),
+        ));
     }
     let mut tree = assemble(root, next_id.into_inner(), listings);
     let (m, a) = times(&meta);

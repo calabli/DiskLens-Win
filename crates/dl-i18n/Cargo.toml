@@ -1,0 +1,13 @@
+[package]
+name = "dl-i18n"
+description = "DiskLens 界面语言：按当前语言翻译 Rust 侧给用户看的文字"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

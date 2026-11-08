@@ -113,7 +113,7 @@ impl Protector {
     /// 卷级保留项目、被保护的文件夹本身和包含受保护文件夹的上级仍然不能删除。
     pub fn check_allowing(&self, path: &Path, allowed: &[String]) -> Option<String> {
         let Some(p) = normalize(&path.to_string_lossy()) else {
-            return Some("不是完整路径".into());
+            return Some(dl_i18n::tr("不是完整路径").into());
         };
         let exempt = allowed
             .iter()
@@ -121,21 +121,24 @@ impl Protector {
             .any(|a| p == a || is_under(&p, &a));
         let (_, rest) = split_root(&p);
         if rest.is_empty() {
-            return Some("不能删除整个磁盘".into());
+            return Some(dl_i18n::tr("不能删除整个磁盘").into());
         }
         let first = rest.split('\\').next().unwrap_or_default();
         if first.starts_with('$') || VOLUME_RESERVED.contains(&first) {
-            return Some("这是系统保留项目，只能通过系统设置处理".into());
+            return Some(dl_i18n::tr("这是系统保留项目，只能通过系统设置处理").into());
         }
         if let Some(dir) = self
             .subtree
             .iter()
             .find(|d| !exempt && (p == d.key || is_under(&p, &d.key)))
         {
-            return Some(format!("位于受保护的系统文件夹 {} 中", dir.display));
+            return Some(dl_i18n::trf!(
+                "位于受保护的系统文件夹 {dir} 中",
+                dir = dir.display
+            ));
         }
         if self.exact.iter().any(|d| d.key == p) {
-            return Some("这是受保护的文件夹，只能删除其中的内容".into());
+            return Some(dl_i18n::tr("这是受保护的文件夹，只能删除其中的内容").into());
         }
         if let Some(inner) = self
             .subtree
@@ -143,7 +146,10 @@ impl Protector {
             .chain(&self.exact)
             .find(|d| is_under(&d.key, &p))
         {
-            return Some(format!("其中包含受保护的文件夹 {}", inner.display));
+            return Some(dl_i18n::trf!(
+                "其中包含受保护的文件夹 {inner}",
+                inner = inner.display
+            ));
         }
         None
     }

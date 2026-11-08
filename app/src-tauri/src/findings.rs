@@ -88,7 +88,7 @@ pub async fn find_issues(
             findings::verify_all(&candidates, dl_analyze::dupes::default_threads(), &progress)
                 .map_err(|e| {
                     if e.kind() == std::io::ErrorKind::Interrupted {
-                        "已取消".to_string()
+                        dl_i18n::tr("已取消").to_string()
                     } else {
                         e.to_string()
                     }

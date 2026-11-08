@@ -51,26 +51,33 @@ impl Category {
         {
             return Some(c);
         }
+        // 搜索语法里的中文别名，不翻译。i18n-ignore-start
         Some(match n.as_str() {
-            "系统" | "sys" => Category::System,
-            "应用" | "程序" | "exe" => Category::App,
-            "开发" | "缓存" => Category::Dev,
-            "视频" | "音频" | "video" | "audio" | "music" | "音乐" => Category::Media,
-            "安装包" | "镜像" | "压缩包" | "archive" | "zip" | "iso" => Category::Package,
-            "文档" | "图片" | "照片" | "doc" | "image" | "photo" => Category::Document,
+            "系统" | "系統" | "sys" => Category::System,
+            "应用" | "程序" | "應用" | "程式" | "exe" => Category::App,
+            "开发" | "缓存" | "開發" | "快取" | "cache" => Category::Dev,
+            "视频" | "音频" | "音乐" | "影片" | "音訊" | "音樂" | "video" | "audio" | "music" => {
+                Category::Media
+            }
+            "安装包" | "镜像" | "压缩包" | "安裝包" | "映像" | "壓縮檔" | "archive" | "zip"
+            | "iso" => Category::Package,
+            "文档" | "图片" | "照片" | "文件" | "圖片" | "doc" | "image" | "photo" => {
+                Category::Document
+            }
             _ => return None,
         })
+        // i18n-ignore-end
     }
 
     pub const fn label(self) -> &'static str {
         match self {
-            Category::System => "系统文件",
-            Category::App => "应用程序",
-            Category::Dev => "开发缓存",
-            Category::Media => "音视频",
-            Category::Package => "安装包与镜像",
-            Category::Document => "文档与图片",
-            Category::Other => "其他",
+            Category::System => dl_i18n::tk("系统文件"),
+            Category::App => dl_i18n::tk("应用程序"),
+            Category::Dev => dl_i18n::tk("开发缓存"),
+            Category::Media => dl_i18n::tk("音视频"),
+            Category::Package => dl_i18n::tk("安装包与镜像"),
+            Category::Document => dl_i18n::tk("文档与图片"),
+            Category::Other => dl_i18n::tk("其他"),
         }
     }
 }

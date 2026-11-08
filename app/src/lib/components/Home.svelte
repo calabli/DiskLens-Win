@@ -1,6 +1,7 @@
 <script lang="ts">
   import { listVolumes, type CachedScan, type Volume } from "$lib/api";
   import { formatAgo, formatPercent, formatSize } from "$lib/format";
+  import { t } from "$lib/i18n.svelte";
 
   interface Props {
     /** 缓存的扫描结果，最近的在前。 */
@@ -30,7 +31,7 @@
 <main class="home">
   <header>
     <h1>DiskLens</h1>
-    <p>选择一个磁盘，看看空间都去哪儿了。</p>
+    <p>{t("选择一个磁盘，看看空间都去哪儿了。")}</p>
   </header>
 
   {#if error}
@@ -50,9 +51,14 @@
           </svg>
           <span class="meta">
             <span class="name"
-              >{v.label || "本地磁盘"} <span class="letter">{v.root.slice(0, 2)}</span></span
+              >{v.label || t("本地磁盘")} <span class="letter">{v.root.slice(0, 2)}</span></span
             >
-            <span class="usage">{formatSize(v.free)} 可用，共 {formatSize(v.total)}</span>
+            <span class="usage"
+              >{t("{free} 可用，共 {total}", {
+                free: formatSize(v.free),
+                total: formatSize(v.total),
+              })}</span
+            >
             <span class="bar" aria-hidden="true"
               ><span style:width={formatPercent(used, v.total)}></span></span
             >
@@ -64,7 +70,7 @@
   </ul>
 
   {#if cached.length > 0}
-    <h2>最近的结果</h2>
+    <h2>{t("最近的结果")}</h2>
     <ul class="volumes recent">
       {#each cached as c (c.root)}
         <li>
@@ -72,7 +78,7 @@
             type="button"
             class="volume"
             onclick={() => onopen(c.root)}
-            title="打开上次的扫描结果，不重新扫描"
+            title={t("打开上次的扫描结果，不重新扫描")}
           >
             <svg class="clock" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"
               ><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -87,11 +93,12 @@
             <span class="meta">
               <span class="name">{c.root}</span>
               <span class="usage"
-                >{formatAgo(c.scannedAt)} · {formatSize(c.totalSize)} · {c.fileCount.toLocaleString()}
-                个文件</span
+                >{formatAgo(c.scannedAt)} · {formatSize(c.totalSize)} · {t("{n} 个文件", {
+                  n: c.fileCount.toLocaleString(),
+                })}</span
               >
             </span>
-            <span class="open">打开</span>
+            <span class="open">{t("打开")}</span>
           </button>
         </li>
       {/each}
@@ -99,12 +106,12 @@
   {/if}
 
   <form class="folder" onsubmit={scanFolder}>
-    <label for="folder">扫描某个文件夹</label>
+    <label for="folder">{t("扫描某个文件夹")}</label>
     <div class="row">
       <input id="folder" bind:value={folder} spellcheck="false" autocomplete="off" />
-      <button type="submit">扫描</button>
+      <button type="submit">{t("扫描")}</button>
     </div>
-    <p class="hint">以管理员身份运行时，NTFS 磁盘会直接读取 MFT，几秒内完成。</p>
+    <p class="hint">{t("以管理员身份运行时，NTFS 磁盘会直接读取 MFT，几秒内完成。")}</p>
   </form>
 </main>
 

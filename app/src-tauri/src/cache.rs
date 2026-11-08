@@ -82,7 +82,7 @@ fn file_name(root: &str) -> String {
 fn cache_path(root: &str) -> Result<PathBuf, String> {
     cache_dir()
         .map(|d| d.join(file_name(root)))
-        .ok_or_else(|| "找不到 LOCALAPPDATA 文件夹".to_string())
+        .ok_or_else(|| dl_i18n::tr("找不到 LOCALAPPDATA 文件夹").to_string())
 }
 
 /// 完整扫描完成、保存新结果之前调用：把 `root` 原来的结果留作变化对比的基准。
@@ -94,7 +94,7 @@ pub fn keep_baseline(root: &str) {
         let base = path.with_extension(BASE_EXT);
         let _ = std::fs::remove_file(&base);
         if let Err(e) = std::fs::rename(&path, &base) {
-            eprintln!("保留对比基准失败：{e}");
+            eprintln!("{}", dl_i18n::trf!("保留对比基准失败：{e}", e = e));
         }
     }
 }
@@ -116,8 +116,8 @@ pub fn load_baseline(root: &str) -> Result<Option<(u64, std::time::SystemTime, F
     let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) else {
         return Ok(None);
     };
-    let (meta, tree) =
-        dl_snapshot::load::<CacheMeta>(&path).map_err(|e| format!("读取对比基准失败：{e}"))?;
+    let (meta, tree) = dl_snapshot::load::<CacheMeta>(&path)
+        .map_err(|e| dl_i18n::trf!("读取对比基准失败：{e}", e = e))?;
     Ok(Some((meta.scanned_at, modified, tree)))
 }
 
@@ -132,7 +132,7 @@ pub fn save_in_background(scan: Arc<Scanned>) {
     std::thread::spawn(move || {
         let _guard = SAVING.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = save(&scan) {
-            eprintln!("保存扫描缓存失败：{e}");
+            eprintln!("{}", dl_i18n::trf!("保存扫描缓存失败：{e}", e = e));
         }
     });
 }
@@ -200,7 +200,7 @@ pub async fn open_cached(root: String, state: State<'_, AppState>) -> Result<Sca
         tauri::async_runtime::spawn_blocking(move || dl_snapshot::load::<CacheMeta>(&path))
             .await
             .map_err(|e| e.to_string())?
-            .map_err(|e| format!("读取上次的扫描结果失败：{e}"))?;
+            .map_err(|e| dl_i18n::trf!("读取上次的扫描结果失败：{e}", e = e))?;
 
     let summary = ScanSummary {
         root: meta.root,

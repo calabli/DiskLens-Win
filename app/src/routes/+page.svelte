@@ -13,6 +13,7 @@
   import Explorer from "$lib/components/Explorer.svelte";
   import Home from "$lib/components/Home.svelte";
   import ScanProgress from "$lib/components/ScanProgress.svelte";
+  import { t } from "$lib/i18n.svelte";
 
   type Phase = "starting" | "home" | "scanning" | "result";
 
@@ -58,7 +59,7 @@
       phase = "result";
     } catch (e) {
       const message = String(e);
-      if (message !== "已取消") error = message;
+      if (message !== t("已取消")) error = message;
       phase = previous === "result" && summary ? "result" : "home";
     }
   }
@@ -103,7 +104,7 @@
 {#if error}
   <p class="error" role="alert">
     {error}
-    <button type="button" onclick={() => (error = "")}>关闭</button>
+    <button type="button" onclick={() => (error = "")}>{t("关闭")}</button>
   </p>
 {/if}
 

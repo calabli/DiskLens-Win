@@ -2,6 +2,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { cleanSuggestions, type Suggestion } from "$lib/api";
   import { formatSize } from "$lib/format";
+  import { t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     /** 数据版本；清理或刷新后递增，重新计算建议。 */
@@ -15,9 +16,9 @@
   let { version, onclean, onreveal, onclose }: Props = $props();
 
   const RISK = {
-    low: { label: "低风险", tone: "good" },
-    medium: { label: "中风险", tone: "warn" },
-    high: { label: "高风险", tone: "danger" },
+    low: { label: tk("低风险"), tone: "good" },
+    medium: { label: tk("中风险"), tone: "warn" },
+    high: { label: tk("高风险"), tone: "danger" },
   } as const;
 
   let items = $state<Suggestion[] | null>(null);
@@ -82,53 +83,63 @@
           checked={picked.has(s.id)}
           disabled={!!s.running}
           onchange={() => toggle(s.id)}
-          aria-label="清理 {s.name}"
+          aria-label={t("清理 {name}", { name: s.name })}
         />
       {/if}
       <h3>{s.name}</h3>
-      <span class="risk {risk.tone}">{risk.label}</span>
+      <span class="risk {risk.tone}">{t(risk.label)}</span>
       <span class="size">{formatSize(s.size)}</span>
     </div>
     <p class="desc">{s.description}</p>
     {#if s.running}
       <p class="running" role="status">
-        <strong>{s.running} 正在运行。</strong>退出 {s.running} 后切回这里就可以清理；开着时清理，正在用的缓存删不掉，浏览器也可能出错。
+        <strong>{t("{app} 正在运行。", { app: s.running })}</strong>{t(
+          "退出 {app} 后切回这里就可以清理；开着时清理，正在用的缓存删不掉，浏览器也可能出错。",
+          { app: s.running },
+        )}
       </p>
     {/if}
-    <p class="effect"><strong>删除后：</strong>{s.effect}</p>
+    <p class="effect"><strong>{t("删除后：")}</strong>{s.effect}</p>
     {#if s.guide}
-      <p class="guide"><strong>处理方法：</strong>{s.guide}</p>
+      <p class="guide"><strong>{t("处理方法：")}</strong>{s.guide}</p>
     {/if}
     <button type="button" class="link" onclick={() => toggleOpen(s.id)}
-      >{opened.has(s.id) ? "收起位置" : `${s.count.toLocaleString()} 个位置`}</button
+      >{opened.has(s.id) ? t("收起位置") : t("{n} 个位置", { n: s.count.toLocaleString() })}</button
     >
     {#if opened.has(s.id)}
       <ul>
         {#each s.locations as l (l.id)}
           <li>
-            <button type="button" class="path" title="在主界面中定位" onclick={() => onreveal(l.id)}
-              >{l.path}</button
+            <button
+              type="button"
+              class="path"
+              title={t("在主界面中定位")}
+              onclick={() => onreveal(l.id)}>{l.path}</button
             >
             <span>{formatSize(l.size)}</span>
           </li>
         {/each}
         {#if s.count > s.locations.length}
-          <li class="muted">另有 {(s.count - s.locations.length).toLocaleString()} 个位置</li>
+          <li class="muted">
+            {t("另有 {n} 个位置", { n: (s.count - s.locations.length).toLocaleString() })}
+          </li>
         {/if}
       </ul>
     {/if}
   </article>
 {/snippet}
 
-<section class="suggest" aria-label="清理建议">
+<section class="suggest" aria-label={t("清理建议")}>
   <header>
     <div class="title">
-      <h2>清理建议</h2>
+      <h2>{t("清理建议")}</h2>
       <span
-        >按内置规则在本次扫描结果中找出可以释放的空间。每一项都说明是什么、删除后会怎样，只有低风险项会默认勾选。</span
+        >{t(
+          "按内置规则在本次扫描结果中找出可以释放的空间。每一项都说明是什么、删除后会怎样，只有低风险项会默认勾选。",
+        )}</span
       >
     </div>
-    <button type="button" class="close" onclick={onclose} aria-label="关闭">
+    <button type="button" class="close" onclick={onclose} aria-label={t("关闭")}>
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
         ><path
           d="m4 4 8 8M12 4l-8 8"
@@ -146,36 +157,37 @@
 
   {#if items && items.length === 0}
     <div class="state">
-      <p>没有找到可以清理的项目。</p>
+      <p>{t("没有找到可以清理的项目。")}</p>
       <p class="muted">
-        建议只针对本次扫描的范围；扫描系统盘（C:）才能看到系统临时文件和更新缓存。
+        {t("建议只针对本次扫描的范围；扫描系统盘（C:）才能看到系统临时文件和更新缓存。")}
       </p>
     </div>
   {:else if items}
     <div class="list">
       {#if cleanable.length > 0}
-        <h4>可以清理</h4>
+        <h4>{t("可以清理")}</h4>
         {#each cleanable as s (s.id)}{@render card(s)}{/each}
       {/if}
       {#if guides.length > 0}
-        <h4>需要通过系统或程序处理</h4>
-        <p class="muted section-note">这些项目直接删除可能带来问题，请按处理方法操作。</p>
+        <h4>{t("需要通过系统或程序处理")}</h4>
+        <p class="muted section-note">{t("这些项目直接删除可能带来问题，请按处理方法操作。")}</p>
         {#each guides as s (s.id)}{@render card(s)}{/each}
       {/if}
       <p class="muted section-note">
-        建议只针对本次扫描的范围；扫描系统盘（C:）才能看到系统临时文件和更新缓存。
+        {t("建议只针对本次扫描的范围；扫描系统盘（C:）才能看到系统临时文件和更新缓存。")}
       </p>
     </div>
     <footer>
       <span
-        >已选 <strong>{picked.size}</strong> 项，可释放
+        >{t("已选")} <strong>{picked.size}</strong>
+        {t("项，可释放")}
         <strong>{formatSize(pickedSize)}</strong></span
       >
       <button
         type="button"
         class="primary"
         disabled={picked.size === 0}
-        onclick={() => onclean([...picked])}>清理所选…</button
+        onclick={() => onclean([...picked])}>{t("清理所选…")}</button
       >
     </footer>
   {/if}

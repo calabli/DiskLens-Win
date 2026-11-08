@@ -26,7 +26,7 @@ pub fn delete(path: &Path, mode: Mode) -> Result<(), String> {
 /// 移到回收站时不逐个报告，由调用方在整项完成后自己计入。
 pub fn delete_with(path: &Path, mode: Mode, on_file: &mut dyn FnMut(u64)) -> Result<(), String> {
     if fs::symlink_metadata(path).is_err() {
-        return Err("文件已不存在".into());
+        return Err(dl_i18n::tr("文件已不存在").into());
     }
     match mode {
         Mode::Recycle => sys::delete(path, mode)?,
@@ -38,7 +38,7 @@ pub fn delete_with(path: &Path, mode: Mode, on_file: &mut dyn FnMut(u64)) -> Res
         }
     }
     if fs::symlink_metadata(path).is_ok() {
-        return Err("未能删除，文件可能正被其他程序使用".into());
+        return Err(dl_i18n::tr("未能删除，文件可能正被其他程序使用").into());
     }
     Ok(())
 }
@@ -146,7 +146,7 @@ mod sys {
             unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
                 .ok()
                 .map(|()| Com)
-                .map_err(|e| format!("初始化 COM 失败：{e}"))
+                .map_err(|e| dl_i18n::trf!("初始化 COM 失败：{e}", e = e))
         }
     }
 
@@ -164,25 +164,25 @@ mod sys {
         // SAFETY: 以下调用都在已初始化 COM 的线程上进行；wide 以 0 结尾且在调用期间有效。
         unsafe {
             let op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)
-                .map_err(|e| format!("无法创建文件操作：{e}"))?;
+                .map_err(|e| dl_i18n::trf!("无法创建文件操作：{e}", e = e))?;
             let mut flags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI | FOFX_EARLYFAILURE;
             if mode == Mode::Recycle {
                 flags |= FOF_ALLOWUNDO | FOFX_RECYCLEONDELETE;
             }
             op.SetOperationFlags(flags)
-                .map_err(|e| format!("设置删除选项失败：{e}"))?;
+                .map_err(|e| dl_i18n::trf!("设置删除选项失败：{e}", e = e))?;
             let item: IShellItem = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None)
-                .map_err(|e| format!("无法打开该路径：{e}"))?;
+                .map_err(|e| dl_i18n::trf!("无法打开该路径：{e}", e = e))?;
             op.DeleteItem(&item, None)
-                .map_err(|e| format!("无法删除：{e}"))?;
+                .map_err(|e| dl_i18n::trf!("无法删除：{e}", e = e))?;
             op.PerformOperations()
-                .map_err(|e| format!("删除失败：{e}"))?;
+                .map_err(|e| dl_i18n::trf!("删除失败：{e}", e = e))?;
             if op
                 .GetAnyOperationsAborted()
                 .map_err(|e| e.to_string())?
                 .as_bool()
             {
-                return Err("删除被中止".into());
+                return Err(dl_i18n::tr("删除被中止").into());
             }
         }
         Ok(())
@@ -197,7 +197,7 @@ mod sys {
 
     pub fn delete(path: &Path, mode: Mode) -> Result<(), String> {
         if mode == Mode::Recycle {
-            return Err("此平台不支持回收站".into());
+            return Err(dl_i18n::tr("此平台不支持回收站").into());
         }
         let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
         if meta.is_dir() {

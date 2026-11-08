@@ -19,7 +19,10 @@ const MAX_META: u32 = 1 << 20;
 const LEVEL: i32 = 1;
 
 fn invalid(msg: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, format!("快照文件损坏：{msg}"))
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        dl_i18n::trf!("快照文件损坏：{msg}", msg = msg),
+    )
 }
 
 /// 把 `meta` 和 `tree` 写入 `path`。先写到临时文件再改名，写到一半失败不会破坏原有快照。
@@ -54,17 +57,17 @@ fn read_header<M: DeserializeOwned>(r: &mut impl Read) -> io::Result<M> {
     let mut magic = [0; 8];
     r.read_exact(&mut magic)?;
     if &magic != MAGIC {
-        return Err(invalid("文件头不对"));
+        return Err(invalid(dl_i18n::tr("文件头不对")));
     }
     let mut len = [0; 4];
     r.read_exact(&mut len)?;
     let len = u32::from_le_bytes(len);
     if len > MAX_META {
-        return Err(invalid("描述信息过长"));
+        return Err(invalid(dl_i18n::tr("描述信息过长")));
     }
     let mut meta = vec![0; len as usize];
     r.read_exact(&mut meta)?;
-    serde_json::from_slice(&meta).map_err(|_| invalid("描述信息不对"))
+    serde_json::from_slice(&meta).map_err(|_| invalid(dl_i18n::tr("描述信息不对")))
 }
 
 /// 只读快照的描述信息。
@@ -80,7 +83,7 @@ pub fn load<M: DeserializeOwned>(path: &Path) -> io::Result<(M, FileTree)> {
     let tree = FileTree::read_from(&mut decoder)?;
     // 读到压缩流末尾，zstd 才会核对校验和。
     if io::copy(&mut decoder, &mut io::sink())? != 0 {
-        return Err(invalid("文件树后面有多余数据"));
+        return Err(invalid(dl_i18n::tr("文件树后面有多余数据")));
     }
     Ok((meta, tree))
 }

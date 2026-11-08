@@ -39,13 +39,15 @@ fn needs_full(reason: impl Into<String>) -> Refresh {
 pub async fn refresh_scan(state: State<'_, AppState>) -> Result<Refresh, String> {
     let scan = state.current()?;
     let Some(letter) = volume_root(&scan.summary.root) else {
-        return Ok(needs_full("只有整个磁盘的扫描结果才能增量刷新"));
+        return Ok(needs_full(dl_i18n::tr(
+            "只有整个磁盘的扫描结果才能增量刷新",
+        )));
     };
     if scan.summary.mode != ScanMode::Mft {
-        return Ok(needs_full("普通遍历的结果不能增量刷新"));
+        return Ok(needs_full(dl_i18n::tr("普通遍历的结果不能增量刷新")));
     }
     if scan.journal().is_none() {
-        return Ok(needs_full("这个磁盘没有启用 USN 日志"));
+        return Ok(needs_full(dl_i18n::tr("这个磁盘没有启用 USN 日志")));
     }
 
     tauri::async_runtime::spawn_blocking(move || run(scan, letter))
@@ -55,7 +57,7 @@ pub async fn refresh_scan(state: State<'_, AppState>) -> Result<Refresh, String>
 
 #[cfg(not(windows))]
 fn run(_: Arc<Scanned>, _: char) -> Refresh {
-    needs_full("只在 Windows 上支持")
+    needs_full(dl_i18n::tr("只在 Windows 上支持"))
 }
 
 #[cfg(windows)]
@@ -66,7 +68,7 @@ fn run(scan: Arc<Scanned>, letter: char) -> Refresh {
     // 同一时间只做一次刷新；索引锁同时充当刷新锁。
     let mut index = scan.index.lock().unwrap_or_else(|e| e.into_inner());
     let Some(pos) = scan.journal() else {
-        return needs_full("这个磁盘没有启用 USN 日志");
+        return needs_full(dl_i18n::tr("这个磁盘没有启用 USN 日志"));
     };
     let volume = match dl_ntfs::open_volume(letter) {
         Ok(v) => v,
