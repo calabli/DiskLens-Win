@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "disklens"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "dl-analyze",
  "dl-clean",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "dl-analyze"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "dl-i18n",
  "dl-tree",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "dl-clean"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "dl-i18n",
  "dl-tree",
@@ -673,14 +673,14 @@ dependencies = [
 
 [[package]]
 name = "dl-i18n"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "dl-ntfs"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "dl-i18n",
  "dl-tree",
@@ -690,7 +690,7 @@ dependencies = [
 
 [[package]]
 name = "dl-snapshot"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "dl-i18n",
  "dl-tree",
@@ -701,14 +701,14 @@ dependencies = [
 
 [[package]]
 name = "dl-tree"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "dl-i18n",
 ]
 
 [[package]]
 name = "dl-walk"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "dl-i18n",
  "dl-tree",
