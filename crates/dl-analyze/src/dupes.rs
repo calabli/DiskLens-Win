@@ -313,7 +313,10 @@ pub fn find_duplicates(
         }
     });
     if cancelled.load(Ordering::Relaxed) {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "查重已取消"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            dl_i18n::tr("查重已取消"),
+        ));
     }
 
     // 同一个文件的多个名称只留第一个。
@@ -365,7 +368,10 @@ pub fn find_duplicates(
         result
     });
     if cancelled.load(Ordering::Relaxed) {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "查重已取消"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            dl_i18n::tr("查重已取消"),
+        ));
     }
     for (j, full) in fulls.into_iter().enumerate() {
         let c = &mut pending[need[j]];

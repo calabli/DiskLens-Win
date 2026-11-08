@@ -3,6 +3,7 @@
   import { cubicOut } from "svelte/easing";
   import type { LiveEntry, ScanMode } from "$lib/api";
   import { formatPercent, formatSize } from "$lib/format";
+  import { t } from "$lib/i18n.svelte";
 
   interface Props {
     path: string;
@@ -31,38 +32,42 @@
 <main class="scan">
   <section class="card" class:wide={live.length > 0} aria-live="polite">
     <div class="spinner" aria-hidden="true"></div>
-    <h1>正在扫描 {path}</h1>
+    <h1>{t("正在扫描 {path}", { path })}</h1>
     <p class="mode">
       {#if mode === "mft"}
-        <span class="badge good">MFT 直读</span>
+        <span class="badge good">{t("MFT 直读")}</span>
       {:else if mode === "walk"}
-        <span class="badge">普通遍历</span>
+        <span class="badge">{t("普通遍历")}</span>
       {:else}
-        准备中…
+        {t("准备中…")}
       {/if}
     </p>
     <dl>
       <div>
-        <dt>{mode === "mft" ? "已解析记录" : "已处理项目"}</dt>
+        <dt>{mode === "mft" ? t("已解析记录") : t("已处理项目")}</dt>
         <dd>{processed.toLocaleString()}</dd>
       </div>
       <div>
-        <dt>用时</dt>
-        <dd>{(elapsedMs / 1000).toFixed(1)} 秒</dd>
+        <dt>{t("用时")}</dt>
+        <dd>{t("{s} 秒", { s: (elapsedMs / 1000).toFixed(1) })}</dd>
       </div>
       <div>
-        <dt>速度</dt>
-        <dd>{rate.toLocaleString()}/秒</dd>
+        <dt>{t("速度")}</dt>
+        <dd>{t("{n}/秒", { n: rate.toLocaleString() })}</dd>
       </div>
     </dl>
     {#if fallbackReason}
-      <p class="notice">未能使用 MFT 直读（{fallbackReason}），已改用普通遍历，会慢一些。</p>
+      <p class="notice">
+        {t("未能使用 MFT 直读（{reason}），已改用普通遍历，会慢一些。", {
+          reason: fallbackReason,
+        })}
+      </p>
     {/if}
     {#if live.length > 0}
       <!-- 边扫边看：顶层项目的大小随扫描增长，排名变化时平滑换位。 -->
-      <div class="live" aria-label="目前发现的最大项目">
+      <div class="live" aria-label={t("目前发现的最大项目")}>
         <div class="live-head">
-          <span>目前发现</span>
+          <span>{t("目前发现")}</span>
           <span>{formatSize(liveTotal)}</span>
         </div>
         <ul>
@@ -79,11 +84,11 @@
           {/each}
         </ul>
         {#if live.length > SHOWN && rest > 0}
-          <p class="rest">其余项目共 {formatSize(rest)}</p>
+          <p class="rest">{t("其余项目共 {size}", { size: formatSize(rest) })}</p>
         {/if}
       </div>
     {/if}
-    <button type="button" onclick={oncancel}>取消</button>
+    <button type="button" onclick={oncancel}>{t("取消")}</button>
   </section>
 </main>
 

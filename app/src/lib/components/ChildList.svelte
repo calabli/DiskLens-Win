@@ -1,17 +1,18 @@
 <script lang="ts" module>
+  import { t, tk } from "$lib/i18n.svelte";
   /** 可选的列。名称列总是显示。 */
   export type ColumnKey =
     "size" | "allocated" | "percent" | "files" | "modified" | "accessed" | "owner";
   export type SortKey = "name" | "size" | "allocated" | "files" | "modified" | "accessed";
 
   export const COLUMNS: { key: ColumnKey; label: string; width: string; sort?: SortKey }[] = [
-    { key: "size", label: "大小", width: "72px", sort: "size" },
-    { key: "allocated", label: "占用", width: "72px", sort: "allocated" },
-    { key: "percent", label: "占比", width: "108px", sort: "size" },
-    { key: "files", label: "项目", width: "64px", sort: "files" },
-    { key: "modified", label: "修改时间", width: "84px", sort: "modified" },
-    { key: "accessed", label: "访问时间", width: "84px", sort: "accessed" },
-    { key: "owner", label: "所有者", width: "120px" },
+    { key: "size", label: tk("大小"), width: "72px", sort: "size" },
+    { key: "allocated", label: tk("占用"), width: "72px", sort: "allocated" },
+    { key: "percent", label: tk("占比"), width: "108px", sort: "size" },
+    { key: "files", label: tk("项目"), width: "64px", sort: "files" },
+    { key: "modified", label: tk("修改时间"), width: "84px", sort: "modified" },
+    { key: "accessed", label: tk("访问时间"), width: "84px", sort: "accessed" },
+    { key: "owner", label: tk("所有者"), width: "120px" },
   ];
 
   export const DEFAULT_COLUMNS: ColumnKey[] = ["size", "percent", "files"];
@@ -130,27 +131,27 @@
   <div class="head" style:grid-template-columns={template}>
     <span></span>
     <button type="button" class="sort" onclick={() => onsort("name")}
-      >名称{sort.key === "name" ? (sort.desc ? " ↓" : " ↑") : ""}</button
+      >{t("名称")}{sort.key === "name" ? (sort.desc ? " ↓" : " ↑") : ""}</button
     >
     {#each shown as c (c.key)}
       {#if c.sort}
         <button type="button" class="sort num" onclick={() => c.sort && onsort(c.sort)}
-          >{c.label}{sort.key === c.sort && c.key !== "percent"
+          >{t(c.label)}{sort.key === c.sort && c.key !== "percent"
             ? sort.desc
               ? " ↓"
               : " ↑"
             : ""}</button
         >
       {:else}
-        <span class="num">{c.label}</span>
+        <span class="num">{t(c.label)}</span>
       {/if}
     {/each}
     <span class="pick">
       <button
         type="button"
         class="pick-btn"
-        aria-label="选择显示的列"
-        title="选择显示的列"
+        aria-label={t("选择显示的列")}
+        title={t("选择显示的列")}
         onclick={() => (picking = !picking)}>⋯</button
       >
       {#if picking}
@@ -162,7 +163,7 @@
                 type="checkbox"
                 checked={columns.includes(c.key)}
                 onchange={() => toggleColumn(c.key)}
-              />{c.label}</label
+              />{t(c.label)}</label
             >
           {/each}
         </div>
@@ -189,7 +190,9 @@
           class:selected={selected.has(entry.id)}
           style:top="{index * ROW}px"
           style:grid-template-columns={template}
-          aria-label="{entry.isDir ? '文件夹' : '文件'} {entry.name}，{formatSize(entry.size)}"
+          aria-label={entry.isDir
+            ? t("文件夹 {name}，{size}", { name: entry.name, size: formatSize(entry.size) })
+            : t("文件 {name}，{size}", { name: entry.name, size: formatSize(entry.size) })}
           aria-pressed={selected.has(entry.id)}
           draggable="true"
           ondragstart={(event) => ondragitem(entry.id, event)}
@@ -265,8 +268,8 @@
             class="explore"
             role="presentation"
             title={entry.isDir
-              ? "在文件管理器中打开（鼠标中键、Ctrl+Enter）"
-              : "在文件管理器中显示（鼠标中键、Ctrl+Enter）"}
+              ? t("在文件管理器中打开（鼠标中键、Ctrl+Enter）")
+              : t("在文件管理器中显示（鼠标中键、Ctrl+Enter）")}
             onclick={(event) => {
               event.stopPropagation();
               onexplore(entry.id);
@@ -290,12 +293,15 @@
       {/each}
     </div>
     {#if entries.length === 0}
-      <p class="empty">没有匹配的项目</p>
+      <p class="empty">{t("没有匹配的项目")}</p>
     {/if}
   </div>
   {#if total > entries.length}
     <p class="more">
-      共 {total.toLocaleString()} 项，只列出最大的 {entries.length.toLocaleString()} 项
+      {t("共 {total} 项，只列出最大的 {n} 项", {
+        total: total.toLocaleString(),
+        n: entries.length.toLocaleString(),
+      })}
     </p>
   {/if}
 </div>

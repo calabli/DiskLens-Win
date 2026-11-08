@@ -134,7 +134,10 @@ pub fn verify_all(
             .collect()
     });
     if cancelled.load(Ordering::Relaxed) {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "查找已取消"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            dl_i18n::tr("查找已取消"),
+        ));
     }
     found.sort_by(|a, b| {
         (a.kind as u8)

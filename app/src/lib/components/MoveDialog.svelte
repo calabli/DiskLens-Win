@@ -3,6 +3,7 @@
   import { cubicOut } from "svelte/easing";
   import { listVolumes, moveFolder, type MoveResult, type Volume } from "$lib/api";
   import { formatSize } from "$lib/format";
+  import { t } from "$lib/i18n.svelte";
 
   interface Props {
     id: number;
@@ -46,16 +47,16 @@
 
   function pick(v: Volume) {
     drive = v.root;
-    folder = `${v.root.slice(0, 2)}\\DiskLens 移出`;
+    folder = `${v.root.slice(0, 2)}\\${t("DiskLens 移出")}`;
   }
 
   async function start() {
     moving = true;
     error = "";
     try {
-      const r = await moveFolder(id, folder, (d, t) => {
+      const r = await moveFolder(id, folder, (d, all) => {
         done = d;
-        total = t;
+        total = all;
       });
       onmoved(r);
     } catch (e) {
@@ -79,15 +80,16 @@
   aria-labelledby="move-title"
   transition:fly={{ y: -24, duration: 220, easing: cubicOut }}
 >
-  <h2 id="move-title">把“{name}”移到其他磁盘</h2>
+  <h2 id="move-title">{t("把“{name}”移到其他磁盘", { name })}</h2>
   <p>
-    文件夹会被复制到新位置、核对无误后从这里删除，原位置留下一个指向新位置的<strong>连接点</strong
-    >： 依赖原路径的程序照常工作，这个磁盘释放 <strong>{formatSize(size)}</strong>。
+    {t("文件夹会被复制到新位置、核对无误后从这里删除，原位置留下一个指向新位置的")}<strong
+      >{t("连接点")}</strong
+    >{t("： 依赖原路径的程序照常工作，这个磁盘释放")} <strong>{formatSize(size)}</strong>{t("。")}
   </p>
-  <p class="muted">文件有正在使用的会直接停止，什么也不改；中途出错会自动撤回。</p>
+  <p class="muted">{t("文件有正在使用的会直接停止，什么也不改；中途出错会自动撤回。")}</p>
 
   <fieldset disabled={moving}>
-    <legend>移到哪个磁盘</legend>
+    <legend>{t("移到哪个磁盘")}</legend>
     {#each usable as v (v.root)}
       {@const enough = v.free >= size + HEADROOM}
       <label class="drive" class:off={!enough}>
@@ -98,18 +100,20 @@
           disabled={!enough}
           onchange={() => pick(v)}
         />
-        <span>{v.label || "本地磁盘"} {v.root.slice(0, 2)}</span>
-        <span class="muted">{formatSize(v.free)} 可用{enough ? "" : "，不够"}</span>
+        <span>{v.label || t("本地磁盘")} {v.root.slice(0, 2)}</span>
+        <span class="muted"
+          >{t("{free} 可用", { free: formatSize(v.free) })}{enough ? "" : t("，不够")}</span
+        >
       </label>
     {:else}
-      <p class="muted">没有其他可用的 NTFS 磁盘。</p>
+      <p class="muted">{t("没有其他可用的 NTFS 磁盘。")}</p>
     {/each}
     {#if drive}
       <label class="folder">
-        <span>放在这个文件夹里</span>
+        <span>{t("放在这个文件夹里")}</span>
         <input bind:value={folder} spellcheck="false" />
       </label>
-      <p class="muted target">移动后的位置：{target}</p>
+      <p class="muted target">{t("移动后的位置：{path}", { path: target })}</p>
     {/if}
   </fieldset>
 
@@ -117,19 +121,24 @@
     <div class="progress" role="progressbar">
       <span style:width="{total > 0 ? (done / total) * 100 : 0}%"></span>
     </div>
-    <p class="muted">正在复制 {formatSize(done)} / {formatSize(total)}，请不要关闭程序…</p>
+    <p class="muted">
+      {t("正在复制 {done} / {total}，请不要关闭程序…", {
+        done: formatSize(done),
+        total: formatSize(total),
+      })}
+    </p>
   {/if}
   {#if error}
     <p class="error" role="alert">{error}</p>
   {/if}
 
   <div class="actions">
-    <button type="button" class="secondary" onclick={onclose} disabled={moving}>取消</button>
+    <button type="button" class="secondary" onclick={onclose} disabled={moving}>{t("取消")}</button>
     <button
       type="button"
       class="primary"
       onclick={start}
-      disabled={moving || !drive || !folder.trim()}>{moving ? "正在移动…" : "移动"}</button
+      disabled={moving || !drive || !folder.trim()}>{moving ? t("正在移动…") : t("移动")}</button
     >
   </div>
 </div>

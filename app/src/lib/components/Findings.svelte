@@ -8,6 +8,7 @@
     type FindingKind,
     type FindResult,
   } from "$lib/api";
+  import { t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     rootId: number;
@@ -29,23 +30,27 @@
   const SECTIONS: { kind: FindingKind; title: string; note: string }[] = [
     {
       kind: "brokenLink",
-      title: "失效的链接",
-      note: "符号链接或连接点指向的位置已经不存在。删除只去掉链接本身。",
+      title: tk("失效的链接"),
+      note: tk("符号链接或连接点指向的位置已经不存在。删除只去掉链接本身。"),
     },
     {
       kind: "brokenShortcut",
-      title: "失效的快捷方式",
-      note: "快捷方式指向的文件或文件夹已经不存在（目标所在磁盘未连接的不算）。",
+      title: tk("失效的快捷方式"),
+      note: tk("快捷方式指向的文件或文件夹已经不存在（目标所在磁盘未连接的不算）。"),
     },
     {
       kind: "emptyDir",
-      title: "空文件夹",
-      note: "里面没有任何文件，只有空的子文件夹。个别程序需要事先存在的空文件夹，删除前请留意。",
+      title: tk("空文件夹"),
+      note: tk(
+        "里面没有任何文件，只有空的子文件夹。个别程序需要事先存在的空文件夹，删除前请留意。",
+      ),
     },
     {
       kind: "emptyFile",
-      title: "空文件",
-      note: "大小为 0 的文件。有些程序用空文件做标记（例如 __init__.py、.gitkeep），删除前请确认用途。",
+      title: tk("空文件"),
+      note: tk(
+        "大小为 0 的文件。有些程序用空文件做标记（例如 __init__.py、.gitkeep），删除前请确认用途。",
+      ),
     },
   ];
   /** 每类最多显示的项数，展开后显示全部。 */
@@ -97,7 +102,7 @@
         total = t;
       });
     } catch (e) {
-      if (String(e) !== "已取消") error = String(e);
+      if (String(e) !== t("已取消")) error = String(e);
     } finally {
       running = false;
     }
@@ -122,20 +127,24 @@
   }
 </script>
 
-<section class="findings" aria-label="空文件夹与失效链接">
+<section class="findings" aria-label={t("空文件夹与失效链接")}>
   <header>
     <div class="title">
-      <h2>空文件夹与失效链接</h2>
-      <span>在 {rootName} 中查找空文件夹、空文件，以及指向已不存在位置的链接和快捷方式</span>
+      <h2>{t("空文件夹与失效链接")}</h2>
+      <span
+        >{t("在 {root} 中查找空文件夹、空文件，以及指向已不存在位置的链接和快捷方式", {
+          root: rootName,
+        })}</span
+      >
     </div>
     {#if running}
-      <button type="button" class="secondary" onclick={() => cancelIssues()}>停止</button>
+      <button type="button" class="secondary" onclick={() => cancelIssues()}>{t("停止")}</button>
     {:else}
       <button type="button" class="primary" onclick={start}
-        >{result ? "重新查找" : "开始查找"}</button
+        >{result ? t("重新查找") : t("开始查找")}</button
       >
     {/if}
-    <button type="button" class="close" onclick={onclose} aria-label="关闭">
+    <button type="button" class="close" onclick={onclose} aria-label={t("关闭")}>
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
         ><path
           d="m4 4 8 8M12 4l-8 8"
@@ -154,7 +163,9 @@
   {#if running}
     <div class="state" aria-live="polite">
       <p>
-        正在逐个核实{total > 0 ? ` · ${done.toLocaleString()} / ${total.toLocaleString()}` : "…"}
+        {t("正在逐个核实")}{total > 0
+          ? ` · ${done.toLocaleString()} / ${total.toLocaleString()}`
+          : "…"}
       </p>
       <div class="progress" role="progressbar">
         <span style:width="{total > 0 ? (done / total) * 100 : 0}%"></span>
@@ -162,16 +173,17 @@
     </div>
   {:else if !result}
     <div class="state">
-      <p>先从扫描结果里找出可能的项目，再到磁盘上逐个核实，宁可漏报也不误报。</p>
-      <p class="muted">系统保护的位置不会列出。</p>
+      <p>{t("先从扫描结果里找出可能的项目，再到磁盘上逐个核实，宁可漏报也不误报。")}</p>
+      <p class="muted">{t("系统保护的位置不会列出。")}</p>
     </div>
   {:else if items.length === 0}
     <div class="state">
-      <p>{result.items.length > 0 ? "都已处理。" : "没有找到空文件夹或失效的链接。"}</p>
+      <p>{result.items.length > 0 ? t("都已处理。") : t("没有找到空文件夹或失效的链接。")}</p>
       <p class="muted">
-        核实了 {result.checked.toLocaleString()} 个可能的项目，用时 {(
-          result.elapsedMs / 1000
-        ).toFixed(1)} 秒。
+        {t("核实了 {n} 个可能的项目，用时 {s} 秒。", {
+          n: result.checked.toLocaleString(),
+          s: (result.elapsedMs / 1000).toFixed(1),
+        })}
       </p>
     </div>
   {:else}
@@ -181,13 +193,13 @@
         {#if list.length > 0}
           <article class="section">
             <h3>
-              <span>{s.title}</span>
+              <span>{t(s.title)}</span>
               <span class="count">{list.length.toLocaleString()}</span>
               <button type="button" class="link" onclick={() => toggleAll(list)}
-                >{list.every((f) => marked.has(f.id)) ? "全部取消" : "全选"}</button
+                >{list.every((f) => marked.has(f.id)) ? t("全部取消") : t("全选")}</button
               >
             </h3>
-            <p class="note">{s.note}</p>
+            <p class="note">{t(s.note)}</p>
             <ul>
               {#each expanded.has(s.kind) ? list : list.slice(0, PREVIEW) as f (f.id)}
                 {@const p = split(f.path)}
@@ -196,12 +208,12 @@
                     type="checkbox"
                     checked={marked.has(f.id)}
                     onchange={() => toggle(f.id)}
-                    aria-label="删除 {f.path}"
+                    aria-label={t("删除 {path}", { path: f.path })}
                   />
                   <button
                     type="button"
                     class="path"
-                    title="在主界面中定位"
+                    title={t("在主界面中定位")}
                     onclick={() => onreveal(f.id)}
                     ><span class="dir">{p.dir}</span><span>{p.name}</span></button
                   >
@@ -213,35 +225,37 @@
             </ul>
             {#if list.length > PREVIEW && !expanded.has(s.kind)}
               <button type="button" class="link more" onclick={() => expanded.add(s.kind)}
-                >显示全部 {list.length.toLocaleString()} 项</button
+                >{t("显示全部 {n} 项", { n: list.length.toLocaleString() })}</button
               >
             {/if}
           </article>
         {/if}
       {/each}
       {#if result.more > 0}
-        <p class="muted">另有 {result.more.toLocaleString()} 项因数量太多未列出。</p>
+        <p class="muted">
+          {t("另有 {n} 项因数量太多未列出。", { n: result.more.toLocaleString() })}
+        </p>
       {/if}
     </div>
 
     <footer>
-      <span>已勾选 <strong>{markedCount.toLocaleString()}</strong> 项</span>
+      <span>{t("已勾选")} <strong>{markedCount.toLocaleString()}</strong> {t("项")}</span>
       <button type="button" class="link" onclick={() => marked.clear()} disabled={markedCount === 0}
-        >全部取消</button
+        >{t("全部取消")}</button
       >
       <button
         type="button"
         class="secondary"
         disabled={markedCount === 0}
         onclick={() => onbasket(items.filter((f) => marked.has(f.id)).map((f) => f.id))}
-        >加入收集篮</button
+        >{t("加入收集篮")}</button
       >
       <button
         type="button"
         class="primary"
         disabled={markedCount === 0}
         onclick={() => ondelete(items.filter((f) => marked.has(f.id)).map((f) => f.id))}
-        >删除勾选的项目…</button
+        >{t("删除勾选的项目…")}</button
       >
     </footer>
   {/if}

@@ -21,6 +21,7 @@ serde_json.workspace = true
 sha2 = "0.10"
 dl-analyze.workspace = true
 dl-clean.workspace = true
+dl-i18n.workspace = true
 dl-tree.workspace = true
 dl-walk.workspace = true
 dl-ntfs.workspace = true

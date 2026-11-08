@@ -108,10 +108,10 @@ pub fn open_storage_settings() -> Result<(), String> {
             .arg("ms-settings:storagesense")
             .spawn()
             .map(|_| ())
-            .map_err(|e| format!("无法打开设置：{e}"))
+            .map_err(|e| dl_i18n::trf!("无法打开设置：{e}", e = e))
     }
     #[cfg(not(windows))]
-    Err("只在 Windows 上支持".into())
+    Err(dl_i18n::tr("只在 Windows 上支持").into())
 }
 
 /// `D:\foo` → `D:\`；不是盘符路径（例如网络路径）时为 `None`。

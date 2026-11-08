@@ -33,6 +33,7 @@
   } from "$lib/api";
   import { formatAgo, formatPercent, formatSize } from "$lib/format";
   import { setThemeMode, themeMode, type ThemeMode } from "$lib/theme";
+  import { localeMode, setLocaleMode, t, tk, type LocaleMode } from "$lib/i18n.svelte";
   import { SvelteMap } from "svelte/reactivity";
   import ChildListView, {
     COLUMNS,
@@ -87,44 +88,44 @@
   const VIEWS: { key: View; label: string; icon: string }[] = [
     {
       key: "browse",
-      label: "概览",
+      label: tk("概览"),
       icon: "M2.5 2.5h5v6h-5zM9.5 2.5h4v3h-4zM9.5 7.5h4v6h-4zM2.5 10.5h5v3h-5z",
     },
     {
       key: "suggest",
-      label: "清理建议",
+      label: tk("清理建议"),
       icon: "M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3M3.4 3.4l2.1 2.1M10.5 10.5l2.1 2.1M12.6 3.4l-2.1 2.1M5.5 10.5l-2.1 2.1",
     },
-    { key: "rank", label: "大文件与排行", icon: "M3 13.5v-5M8 13.5v-11M13 13.5v-8" },
-    { key: "dupes", label: "重复文件", icon: "M5.5 5h7v9h-7zM3.5 11.5V2.5h6.5" },
+    { key: "rank", label: tk("大文件与排行"), icon: "M3 13.5v-5M8 13.5v-11M13 13.5v-8" },
+    { key: "dupes", label: tk("重复文件"), icon: "M5.5 5h7v9h-7zM3.5 11.5V2.5h6.5" },
     {
       key: "similar",
-      label: "相似图片",
+      label: tk("相似图片"),
       icon: "M2 3h12v10H2zM2 11l3.5-3.5 3 3 2-2L14 12M10.5 6.2h.01",
     },
     {
       key: "findings",
-      label: "空文件夹与失效链接",
+      label: tk("空文件夹与失效链接"),
       icon: "M1.5 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z",
     },
     {
       key: "projects",
-      label: "开发项目",
+      label: tk("开发项目"),
       icon: "M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4",
     },
     {
       key: "storage",
-      label: "存储详情",
+      label: tk("存储详情"),
       icon: "M2 4.5a1.5 1.5 0 0 1 1.5-1.5h9A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5zM2 9h12M11.5 11h.01",
     },
     {
       key: "changes",
-      label: "变化对比",
+      label: tk("变化对比"),
       icon: "M5 13V3M2.5 5.5 5 3l2.5 2.5M11 3v10M8.5 10.5 11 13l2.5-2.5",
     },
     {
       key: "history",
-      label: "清理记录",
+      label: tk("清理记录"),
       icon: "M8 2a6 6 0 1 1-5.6 3.9M2.2 2.6v3.2h3.2M8 5v3.2l2.2 1.4",
     },
   ];
@@ -224,10 +225,18 @@
   /** 正在检查更新。 */
   let updateOpen = $state(false);
   let theme = $state<ThemeMode>(themeMode());
+  let language = $state<LocaleMode>(localeMode());
+  /** 语言菜单：各语言用它自己的文字显示，方便看不懂当前语言的人也能找到。 */
+  const LANGUAGES: { key: LocaleMode; label: string }[] = [
+    { key: "system", label: tk("跟随系统") },
+    { key: "zh-CN", label: "简体中文" }, // i18n-ignore
+    { key: "zh-TW", label: "繁體中文" }, // i18n-ignore
+    { key: "en", label: "English" },
+  ];
   const THEMES: { key: ThemeMode; label: string }[] = [
-    { key: "system", label: "跟随系统" },
-    { key: "light", label: "浅色" },
-    { key: "dark", label: "深色" },
+    { key: "system", label: tk("跟随系统") },
+    { key: "light", label: tk("浅色") },
+    { key: "dark", label: tk("深色") },
   ];
   /** 正在移动的文件夹。 */
   let moving = $state<{ id: number; name: string; path: string; size: number } | null>(null);
@@ -294,7 +303,7 @@
       .catch((e) => {
         if (mine !== loadSeq) return;
         // 刷新后当前文件夹可能已被删除，回到根目录。
-        if (id !== summary.rootId && String(e).includes("已不存在")) {
+        if (id !== summary.rootId) {
           back = [];
           forward = [];
           dirId = summary.rootId;
@@ -579,11 +588,13 @@
         toast =
           p.busy.length > 0
             ? {
-                message: `${[...new Set(p.busy.map((b) => b.app))].join("、")} 正在运行，请先退出再清理`,
+                message: t("{apps} 正在运行，请先退出再清理", {
+                  apps: [...new Set(p.busy.map((b) => b.app))].join(t("、")),
+                }),
                 detail: p.busy.map((b) => b.name),
                 tone: "warn",
               }
-            : { message: "所选项目里已经没有可以清理的内容", detail: [], tone: "info" };
+            : { message: t("所选项目里已经没有可以清理的内容"), detail: [], tone: "info" };
         return;
       }
       planRules = ruleIds;
@@ -614,14 +625,19 @@
         ? await cleanRules(planRules, permanent, onProgress)
         : await deleteItems(ids, permanent, onProgress);
       const done = result.deleted.length;
-      const verb = permanent ? "已彻底删除" : "已移到回收站";
+      const verb = permanent ? t("已彻底删除") : t("已移到回收站");
       // 清理临时文件时常有大量正在使用的文件删不掉，只列出前几个。
-      const failed = result.failed.slice(0, 5).map((f) => `${f.path}：${f.reason}`);
+      const failed = result.failed
+        .slice(0, 5)
+        .map((f) => t("{path}：{reason}", { path: f.path, reason: f.reason }));
       if (result.failed.length > 5) {
-        failed.push(`另有 ${result.failed.length - 5} 项没能删除，可能正被程序使用`);
+        failed.push(t("另有 {n} 项没能删除，可能正被程序使用", { n: result.failed.length - 5 }));
       }
       toast = {
-        message: done > 0 ? `${verb}，释放 ${formatSize(result.freed)}` : "没有删除任何项目",
+        message:
+          done > 0
+            ? t("{verb}，释放 {size}", { verb, size: formatSize(result.freed) })
+            : t("没有删除任何项目"),
         detail: [...failed, ...(result.logError ? [result.logError] : [])],
         tone: result.failed.length > 0 || result.logError ? "warn" : "info",
       };
@@ -667,8 +683,11 @@
       const changed = r.added + r.removed + r.updated;
       refreshNote =
         changed > 0
-          ? `已刷新，${changed.toLocaleString()} 项有变化（${(r.elapsedMs / 1000).toFixed(1)} 秒）`
-          : "已是最新";
+          ? t("已刷新，{n} 项有变化（{s} 秒）", {
+              n: changed.toLocaleString(),
+              s: (r.elapsedMs / 1000).toFixed(1),
+            })
+          : t("已是最新");
       if (changed > 0) {
         selectOnly(null);
         hoverId = null;
@@ -701,10 +720,13 @@
       toast = {
         message:
           r.linked.length > 0
-            ? `已替换 ${r.linked.length} 个文件为硬链接，释放 ${formatSize(r.freed)}`
-            : "没有替换任何文件",
+            ? t("已替换 {n} 个文件为硬链接，释放 {size}", {
+                n: r.linked.length,
+                size: formatSize(r.freed),
+              })
+            : t("没有替换任何文件"),
         detail: [
-          ...r.failed.map((f) => `${f.path}：${f.reason}`),
+          ...r.failed.map((f) => t("{path}：{reason}", { path: f.path, reason: f.reason })),
           ...(r.logError ? [r.logError] : []),
         ],
         tone: r.failed.length > 0 || r.logError ? "warn" : "info",
@@ -764,9 +786,11 @@
   async function moved(r: MoveResult) {
     moving = null;
     toast = {
-      message: `已移到 ${r.dest}，这个磁盘释放 ${formatSize(r.bytes)}`,
+      message: t("已移到 {dest}，这个磁盘释放 {size}", { dest: r.dest, size: formatSize(r.bytes) }),
       detail: [
-        ...(r.leftover ? [`旧文件夹没能完全删除，可以手动删除：${r.leftover}`] : []),
+        ...(r.leftover
+          ? [t("旧文件夹没能完全删除，可以手动删除：{path}", { path: r.leftover })]
+          : []),
         ...(r.logError ? [r.logError] : []),
       ],
       tone: r.leftover || r.logError ? "warn" : "info",
@@ -803,7 +827,7 @@
     try {
       const { path } = await nodeInfo(id);
       await navigator.clipboard.writeText(path);
-      toast = { message: "已复制路径", detail: [path], tone: "info" };
+      toast = { message: t("已复制路径"), detail: [path], tone: "info" };
     } catch (e) {
       toast = { message: String(e), detail: [], tone: "warn" };
     }
@@ -876,8 +900,8 @@
       class="tool"
       onclick={() => (panels.list = !panels.list)}
       aria-pressed={panels.list}
-      aria-label={panels.list ? "收起列表" : "展开列表"}
-      title={panels.list ? "收起列表" : "展开列表"}
+      aria-label={panels.list ? t("收起列表") : t("展开列表")}
+      title={panels.list ? t("收起列表") : t("展开列表")}
       ><svg viewBox="0 0 20 16" width="17" height="14" aria-hidden="true"
         ><rect
           x="1"
@@ -900,8 +924,12 @@
           ></rect>{/if}</svg
       ></button
     >
-    <div class="nav" role="group" aria-label="导航">
-      <button type="button" onclick={goBack} disabled={back.length === 0} aria-label="后退（Alt+←）"
+    <div class="nav" role="group" aria-label={t("导航")}>
+      <button
+        type="button"
+        onclick={goBack}
+        disabled={back.length === 0}
+        aria-label={t("后退（Alt+←）")}
         ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
           ><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8"></path></svg
         ></button
@@ -910,7 +938,7 @@
         type="button"
         onclick={goForward}
         disabled={forward.length === 0}
-        aria-label="前进（Alt+→）"
+        aria-label={t("前进（Alt+→）")}
         ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
           ><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8"></path></svg
         ></button
@@ -919,7 +947,7 @@
         type="button"
         onclick={up}
         disabled={info?.parent == null}
-        aria-label="上一级（Backspace）"
+        aria-label={t("上一级（Backspace）")}
         ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
           ><path
             d="M8 13V3M3.5 7.5 8 3l4.5 4.5"
@@ -934,7 +962,12 @@
     <div class="title">
       <h1>{title}</h1>
       {#if info}
-        <span>{formatSize(info.size)} · {info.files.toLocaleString()} 个文件</span>
+        <span
+          >{t("{size} · {n} 个文件", {
+            size: formatSize(info.size),
+            n: info.files.toLocaleString(),
+          })}</span
+        >
       {/if}
     </div>
 
@@ -944,8 +977,8 @@
         ></circle><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.6"></path></svg
       >
       <input
-        aria-label="筛选当前文件夹；按回车在所有子文件夹中搜索"
-        placeholder="搜索，如 size:>1gb ext:iso"
+        aria-label={t("筛选当前文件夹；按回车在所有子文件夹中搜索")}
+        placeholder={t("搜索，如 size:>1gb ext:iso")}
         bind:value={filter}
         spellcheck="false"
         autocomplete="off"
@@ -953,15 +986,15 @@
     </form>
 
     <span class="mode" class:good={summary.mode === "mft"}>
-      {summary.mode === "mft" ? "MFT 直读" : "普通遍历"}
+      {summary.mode === "mft" ? t("MFT 直读") : t("普通遍历")}
     </span>
     <button
       type="button"
       class="tool trash"
       onclick={() => askDelete()}
       disabled={selection.length === 0}
-      aria-label="删除选中的 {selection.length} 项（Delete）"
-      title="删除选中的项目（Delete）。Ctrl 或 Shift 点按可多选，Ctrl+A 全选"
+      aria-label={t("删除选中的 {n} 项（Delete）", { n: selection.length })}
+      title={t("删除选中的项目（Delete）。Ctrl 或 Shift 点按可多选，Ctrl+A 全选")}
       >{#if selection.length > 1}<span class="count">{selection.length}</span>{/if}<svg
         viewBox="0 0 24 24"
         width="16"
@@ -982,8 +1015,8 @@
       class="tool"
       class:spinning={refreshing}
       onclick={(e) => (e.shiftKey ? onrescan() : refresh(true))}
-      aria-label="刷新"
-      title="刷新：只读取上次扫描之后的变化。按住 Shift 点按则完整重新扫描"
+      aria-label={t("刷新")}
+      title={t("刷新：只读取上次扫描之后的变化。按住 Shift 点按则完整重新扫描")}
       ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
         ><path
           d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M12 1.5v3h-3"
@@ -1002,8 +1035,8 @@
         onclick={() => (menuOpen = !menuOpen)}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        aria-label="更多"
-        title="更多"
+        aria-label={t("更多")}
+        title={t("更多")}
         ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
           ><circle cx="3.5" cy="8" r="1.4" fill="currentColor"></circle><circle
             cx="8"
@@ -1020,27 +1053,44 @@
             type="button"
             role="menuitem"
             disabled={!menuEntry?.isDir}
-            title={menuEntry?.isDir ? "" : "先选中一个文件夹"}
-            onclick={() => askMove()}>移动到其他磁盘…</button
+            title={menuEntry?.isDir ? "" : t("先选中一个文件夹")}
+            onclick={() => askMove()}>{t("移动到其他磁盘…")}</button
           >
           <button type="button" role="menuitem" onclick={() => showInExplorer()}
-            >在资源管理器中显示</button
+            >{t("在资源管理器中显示")}</button
           >
-          <button type="button" role="menuitem" onclick={() => copyPath()}>复制路径</button>
+          <button type="button" role="menuitem" onclick={() => copyPath()}>{t("复制路径")}</button>
           <hr />
-          <span class="menu-title">外观</span>
-          {#each THEMES as t (t.key)}
+          <span class="menu-title">{t("外观")}</span>
+          {#each THEMES as th (th.key)}
             <button
               type="button"
               role="menuitemradio"
-              aria-checked={theme === t.key}
+              aria-checked={theme === th.key}
               onclick={() => {
-                theme = t.key;
-                setThemeMode(t.key);
+                theme = th.key;
+                setThemeMode(th.key);
                 menuOpen = false;
               }}
-              ><span class="check" aria-hidden="true">{theme === t.key ? "✓" : ""}</span
-              >{t.label}</button
+              ><span class="check" aria-hidden="true">{theme === th.key ? "✓" : ""}</span>{t(
+                th.label,
+              )}</button
+            >
+          {/each}
+          <hr />
+          <span class="menu-title">{t("语言")}</span>
+          {#each LANGUAGES as lang (lang.key)}
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={language === lang.key}
+              onclick={() => {
+                language = lang.key;
+                setLocaleMode(lang.key);
+                menuOpen = false;
+              }}
+              ><span class="check" aria-hidden="true">{language === lang.key ? "✓" : ""}</span
+              >{lang.key === "system" ? t(lang.label) : lang.label}</button
             >
           {/each}
           <hr />
@@ -1050,7 +1100,7 @@
             onclick={() => {
               menuOpen = false;
               updateOpen = true;
-            }}>检查更新…</button
+            }}>{t("检查更新…")}</button
           >
         </div>
       {/if}
@@ -1059,8 +1109,8 @@
       type="button"
       class="tool"
       onclick={onhome}
-      aria-label="选择其他磁盘"
-      title="选择其他磁盘"
+      aria-label={t("选择其他磁盘")}
+      title={t("选择其他磁盘")}
       ><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"
         ><rect
           x="2"
@@ -1079,8 +1129,8 @@
       class="tool side-toggle"
       onclick={() => (panels.side = !panels.side)}
       aria-pressed={panels.side}
-      aria-label={panels.side ? "收起存储空间" : "展开存储空间"}
-      title={panels.side ? "收起存储空间" : "展开存储空间"}
+      aria-label={panels.side ? t("收起存储空间") : t("展开存储空间")}
+      title={panels.side ? t("收起存储空间") : t("展开存储空间")}
       ><svg viewBox="0 0 20 16" width="17" height="14" aria-hidden="true"
         ><rect
           x="1"
@@ -1105,18 +1155,18 @@
     >
   </header>
 
-  {#each [summary.fallbackReason ? `未能使用 MFT 直读（${summary.fallbackReason}），本次是普通遍历。以管理员身份运行会更快、更准确。` : "", filterError, error].filter(Boolean) as message (message)}
+  {#each [summary.fallbackReason ? t( "未能使用 MFT 直读（{reason}），本次是普通遍历。以管理员身份运行会更快、更准确。", { reason: summary.fallbackReason } ) : "", filterError, error].filter(Boolean) as message (message)}
     <p class="banner" role="status">{message}</p>
   {/each}
 
   <div class="main">
-    <nav class="sidebar" class:narrow={!panels.nav} aria-label="功能">
+    <nav class="sidebar" class:narrow={!panels.nav} aria-label={t("功能")}>
       {#each VIEWS as v (v.key)}
         <button
           type="button"
           class:on={view === v.key}
           aria-current={view === v.key ? "page" : undefined}
-          title={v.label}
+          title={t(v.label)}
           onclick={() => (view = v.key)}
           ><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"
             ><path
@@ -1127,7 +1177,7 @@
               stroke-linecap="round"
               stroke-linejoin="round"
             ></path></svg
-          ><span class="label">{v.label}</span>{#if v.key === "suggest" && reclaimable > 0}<span
+          ><span class="label">{t(v.label)}</span>{#if v.key === "suggest" && reclaimable > 0}<span
               class="badge">{formatSize(reclaimable)}</span
             >{/if}</button
         >
@@ -1136,8 +1186,8 @@
         type="button"
         class="collapse"
         onclick={() => (panels.nav = !panels.nav)}
-        aria-label={panels.nav ? "收起边栏" : "展开边栏"}
-        title={panels.nav ? "收起边栏" : "展开边栏"}
+        aria-label={panels.nav ? t("收起边栏") : t("展开边栏")}
+        title={panels.nav ? t("收起边栏") : t("展开边栏")}
         ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
           ><path
             d={panels.nav ? "M10 3.5 5.5 8l4.5 4.5" : "m6 3.5 4.5 4.5L6 12.5"}
@@ -1213,7 +1263,9 @@
                 if (summary.mode === "mft") refresh(false);
                 else
                   toast = {
-                    message: "已放回原处。这次扫描是普通遍历，重新扫描后列表里才会出现放回的项目",
+                    message: t(
+                      "已放回原处。这次扫描是普通遍历，重新扫描后列表里才会出现放回的项目",
+                    ),
                     detail: [],
                     tone: "info",
                   };
@@ -1237,7 +1289,7 @@
         </div>
       {:else}
         <div class="fold list-fold" class:collapsed={!panels.list} inert={!panels.list}>
-          <section class="panel list" aria-label="项目列表">
+          <section class="panel list" aria-label={t("项目列表")}>
             {#if hits}
               <SearchResults
                 query={searchedFor}
@@ -1283,34 +1335,37 @@
           </section>
         </div>
 
-        <section class="panel map" aria-label={panels.chart === "sunburst" ? "旭日图" : "矩形树图"}>
+        <section
+          class="panel map"
+          aria-label={panels.chart === "sunburst" ? t("旭日图") : t("矩形树图")}
+        >
           <div class="map-head">
             {#if focus}
               <strong>{focus.name}</strong>
               <span
                 >{formatSize(focus.size)} · {formatPercent(focus.size, info?.size ?? 0)}{focus.isDir
-                  ? ` · ${focus.files.toLocaleString()} 个文件`
+                  ? t(" · {n} 个文件", { n: focus.files.toLocaleString() })
                   : ""}</span
               >
             {:else if hits}
-              <strong>搜索“{searchedFor}”</strong>
-              <span>有命中项的方块保持原色，其余变灰</span>
+              <strong>{t("搜索“{q}”", { q: searchedFor })}</strong>
+              <span>{t("有命中项的方块保持原色，其余变灰")}</span>
             {:else if selection.length > 1}
-              <strong>已选 {selection.length} 项</strong>
+              <strong>{t("已选 {n} 项", { n: selection.length })}</strong>
               <span
                 >{formatSize(selectedSize)} · {formatPercent(selectedSize, info?.size ?? 0)}</span
               >
             {:else}
               <span
                 >{panels.chart === "sunburst"
-                  ? "点按一圈放大查看，点按圆心返回上一级；Ctrl 点按可多选"
-                  : "点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选"}</span
+                  ? t("点按一圈放大查看，点按圆心返回上一级；Ctrl 点按可多选")
+                  : t("点按文件夹放大查看，Backspace 返回上一级；Ctrl 点按可多选")}</span
               >
             {/if}
             <select
               class="depth"
-              aria-label={panels.chart === "sunburst" ? "旭日图圈数" : "树图层级"}
-              title={panels.chart === "sunburst" ? "旭日图圈数" : "树图显示几层"}
+              aria-label={panels.chart === "sunburst" ? t("旭日图圈数") : t("树图层级")}
+              title={panels.chart === "sunburst" ? t("旭日图圈数") : t("树图显示几层")}
               value={panels.chart === "sunburst" ? panels.depth.sunburst : panels.depth.treemap}
               onchange={(e) => {
                 const v = Number((e.currentTarget as HTMLSelectElement).value);
@@ -1320,15 +1375,17 @@
               }}
             >
               {#each panels.chart === "sunburst" ? [3, 5, 7] : [1, 2, 3] as n (n)}
-                <option value={n}>{panels.chart === "sunburst" ? `${n} 圈` : `${n} 层`}</option>
+                <option value={n}
+                  >{panels.chart === "sunburst" ? t("{n} 圈", { n }) : t("{n} 层", { n })}</option
+                >
               {/each}
             </select>
-            <div class="chart-switch" role="radiogroup" aria-label="图表类型">
+            <div class="chart-switch" role="radiogroup" aria-label={t("图表类型")}>
               <button
                 type="button"
                 role="radio"
                 aria-checked={panels.chart === "treemap"}
-                title="矩形树图"
+                title={t("矩形树图")}
                 onclick={() => (panels.chart = "treemap")}
                 ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
                   ><rect
@@ -1346,7 +1403,7 @@
                 type="button"
                 role="radio"
                 aria-checked={panels.chart === "sunburst"}
-                title="旭日图"
+                title={t("旭日图")}
                 onclick={() => (panels.chart = "sunburst")}
                 ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"
                   ><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor"></circle><circle
@@ -1415,7 +1472,7 @@
     class="basket"
     class:over={dragOver}
     role="region"
-    aria-label="收集篮"
+    aria-label={t("收集篮")}
     ondragover={(event) => {
       if (!event.dataTransfer?.types.includes(DRAG_TYPE)) return;
       event.preventDefault();
@@ -1435,11 +1492,15 @@
         stroke-linejoin="round"
       ></path></svg
     >
-    <strong>收集篮</strong>
+    <strong>{t("收集篮")}</strong>
     {#if basket.length === 0}
-      <span class="hint">把要删除的项目拖到这里，或右键选择“加入收集篮”，收集好了一起删除</span>
+      <span class="hint"
+        >{t("把要删除的项目拖到这里，或右键选择“加入收集篮”，收集好了一起删除")}</span
+      >
     {:else}
-      <span class="sum">{basket.length} 项 · {formatSize(basketSize)}</span>
+      <span class="sum"
+        >{t("{n} 项 · {size}", { n: basket.length, size: formatSize(basketSize) })}</span
+      >
       <div class="chips">
         {#each basket as b (b.id)}
           <span class="chip" title={b.path}>
@@ -1448,7 +1509,7 @@
             ><button
               type="button"
               class="chip-x"
-              aria-label="把 {b.name} 移出收集篮"
+              aria-label={t("把 {name} 移出收集篮", { name: b.name })}
               onclick={() => removeFromBasket(b.id)}
               ><svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"
                 ><path
@@ -1462,17 +1523,17 @@
           </span>
         {/each}
       </div>
-      <button type="button" class="basket-btn" onclick={() => (basket = [])}>清空</button>
+      <button type="button" class="basket-btn" onclick={() => (basket = [])}>{t("清空")}</button>
       <button
         type="button"
         class="basket-btn danger"
-        onclick={() => askDelete(basket.map((b) => b.id))}>删除全部…</button
+        onclick={() => askDelete(basket.map((b) => b.id))}>{t("删除全部…")}</button
       >
     {/if}
   </div>
 
   <footer>
-    <nav class="path" aria-label="路径">
+    <nav class="path" aria-label={t("路径")}>
       {#each info?.crumbs ?? [] as crumb, i (crumb.id)}
         {#if i > 0}<span class="sep" aria-hidden="true">›</span>{/if}
         <button
@@ -1487,20 +1548,21 @@
       {/each}
     </nav>
     <div class="status">
-      {(rootInfo?.files ?? summary.fileCount).toLocaleString()} 个文件，逻辑大小 {formatSize(
-        rootInfo?.size ?? summary.totalSize,
-      )}，占用 {formatSize(rootInfo?.allocated ?? summary.totalAllocated)}，扫描用时 {(
-        summary.elapsedMs / 1000
-      ).toFixed(1)} 秒{#if summary.skipped > 0}，<button
+      {t("{n} 个文件，逻辑大小 {size}，占用 {allocated}，扫描用时 {s} 秒", {
+        n: (rootInfo?.files ?? summary.fileCount).toLocaleString(),
+        size: formatSize(rootInfo?.size ?? summary.totalSize),
+        allocated: formatSize(rootInfo?.allocated ?? summary.totalAllocated),
+        s: (summary.elapsedMs / 1000).toFixed(1),
+      })}{#if summary.skipped > 0}{t("，")}<button
           type="button"
           class="status-link"
-          title="查看读不到的文件夹和原因"
+          title={t("查看读不到的文件夹和原因")}
           onclick={() => (unreadableOpen = true)}
-          >{summary.skipped.toLocaleString()} 个文件夹读不到</button
-        >{/if}，{refreshNote ??
+          >{t("{n} 个文件夹读不到", { n: summary.skipped.toLocaleString() })}</button
+        >{/if}{t("，")}{refreshNote ??
         (summary.fromCache
-          ? `这是${formatAgo(summary.scannedAt)}的扫描结果`
-          : `扫描于${formatAgo(summary.scannedAt)}`)}
+          ? t("这是{ago}的扫描结果", { ago: formatAgo(summary.scannedAt) })
+          : t("扫描于{ago}", { ago: formatAgo(summary.scannedAt) }))}
     </div>
   </footer>
 </div>
@@ -1528,7 +1590,8 @@
   ></div>
   <div class="menu context" role="menu" style:left="{c.x}px" style:top="{c.y}px">
     <button type="button" role="menuitem" onclick={() => explore(c.id)}
-      >{c.isDir ? "在文件管理器中打开" : "打开所在位置"}<span class="key">中键</span></button
+      >{c.isDir ? t("在文件管理器中打开") : t("打开所在位置")}<span class="key">{t("中键")}</span
+      ></button
     >
     {#if c.isDir}
       <button
@@ -1537,17 +1600,19 @@
         onclick={() => {
           ctx = null;
           open(c.id);
-        }}>打开</button
+        }}>{t("打开")}</button
       >
     {/if}
     {#if c.isDir}
       <button type="button" role="menuitem" onclick={() => showInExplorer(c.id)}
-        >在上级文件夹中显示</button
+        >{t("在上级文件夹中显示")}</button
       >
     {/if}
-    <button type="button" role="menuitem" onclick={() => copyPath(c.id)}>复制路径</button>
+    <button type="button" role="menuitem" onclick={() => copyPath(c.id)}>{t("复制路径")}</button>
     {#if c.isDir}
-      <button type="button" role="menuitem" onclick={() => askMove(c.id)}>移动到其他磁盘…</button>
+      <button type="button" role="menuitem" onclick={() => askMove(c.id)}
+        >{t("移动到其他磁盘…")}</button
+      >
     {/if}
     <hr />
     <button
@@ -1556,13 +1621,13 @@
       onclick={() =>
         addToBasket(selection.includes(c.id) && selection.length > 1 ? selection : [c.id])}
       >{selection.includes(c.id) && selection.length > 1
-        ? `把选中的 ${selection.length} 项加入收集篮`
-        : "加入收集篮"}</button
+        ? t("把选中的 {n} 项加入收集篮", { n: selection.length })
+        : t("加入收集篮")}</button
     >
     <button type="button" role="menuitem" class="danger" onclick={() => contextDelete(c.id)}
       >{selection.includes(c.id) && selection.length > 1
-        ? `删除选中的 ${selection.length} 项…`
-        : "删除…"}</button
+        ? t("删除选中的 {n} 项…", { n: selection.length })
+        : t("删除…")}</button
     >
   </div>
 {/if}

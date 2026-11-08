@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
+  import { t } from "$lib/i18n.svelte";
 
   interface Props {
     message: string;
@@ -31,7 +32,7 @@
       <span>{line}</span>
     {/each}
   </div>
-  <button type="button" onclick={onclose} aria-label="关闭">
+  <button type="button" onclick={onclose} aria-label={t("关闭")}>
     <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
       ><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
       ></path></svg

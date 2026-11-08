@@ -12,6 +12,7 @@
     type DupResult,
     type LinkGroup,
   } from "$lib/api";
+  import { locale, t, tk } from "$lib/i18n.svelte";
   import { formatSize } from "$lib/format";
 
   interface Props {
@@ -39,16 +40,16 @@
   type Keep = "shortest" | "newest" | "oldest";
 
   const SIZES = [
-    { label: "全部", value: 1 },
+    { label: tk("全部"), value: 1 },
     { label: "≥ 1 MB", value: 1 << 20 },
     { label: "≥ 10 MB", value: 10 << 20 },
     { label: "≥ 100 MB", value: 100 << 20 },
     { label: "≥ 1 GB", value: 1 << 30 },
   ];
   const KEEP: { key: Keep; label: string }[] = [
-    { key: "shortest", label: "路径最短" },
-    { key: "newest", label: "最新" },
-    { key: "oldest", label: "最旧" },
+    { key: "shortest", label: tk("路径最短") },
+    { key: "newest", label: tk("最新") },
+    { key: "oldest", label: tk("最旧") },
   ];
   /** 一次显示的组数，滚动到底再多显示。 */
   const PAGE = 100;
@@ -128,7 +129,7 @@
       result = await findDuplicates(rootId, minSize, (p) => (progress = p));
       applyKeep();
     } catch (e) {
-      if (String(e) !== "已取消") error = String(e);
+      if (String(e) !== t("已取消")) error = String(e);
     } finally {
       running = false;
     }
@@ -196,7 +197,7 @@
   }
 
   function date(ms: number) {
-    return new Date(ms).toLocaleString("zh-CN", {
+    return new Date(ms).toLocaleString(locale(), {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -217,28 +218,29 @@
   );
 </script>
 
-<section class="dupes" aria-label="重复文件">
+<section class="dupes" aria-label={t("重复文件")}>
   <header>
     <div class="title">
-      <h2>重复文件</h2>
-      <span>在 {rootName} 中查找内容完全相同的文件</span>
+      <h2>{t("重复文件")}</h2>
+      <span>{t("在 {root} 中查找内容完全相同的文件", { root: rootName })}</span>
     </div>
     <label class="size">
-      大小
+      {t("大小")}
       <select bind:value={minSize} disabled={running}>
         {#each SIZES as s (s.value)}
-          <option value={s.value}>{s.label}</option>
+          <option value={s.value}>{t(s.label)}</option>
         {/each}
       </select>
     </label>
     {#if running}
-      <button type="button" class="secondary" onclick={() => cancelDuplicates()}>停止</button>
+      <button type="button" class="secondary" onclick={() => cancelDuplicates()}>{t("停止")}</button
+      >
     {:else}
       <button type="button" class="primary" onclick={start}
-        >{result ? "重新查找" : "开始查找"}</button
+        >{result ? t("重新查找") : t("开始查找")}</button
       >
     {/if}
-    <button type="button" class="close" onclick={onclose} aria-label="关闭重复文件">
+    <button type="button" class="close" onclick={onclose} aria-label={t("关闭重复文件")}>
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
         ><path
           d="m4 4 8 8M12 4l-8 8"
@@ -257,7 +259,7 @@
   {#if running}
     <div class="state" aria-live="polite">
       <p>
-        {progress?.phase === "hashing" ? "正在比对文件内容" : "正在核对大小相同的文件"}
+        {progress?.phase === "hashing" ? t("正在比对文件内容") : t("正在核对大小相同的文件")}
         {#if progress}
           · {progress.filesDone.toLocaleString()} / {progress.filesTotal.toLocaleString()}
         {/if}
@@ -271,31 +273,36 @@
     </div>
   {:else if !result}
     <div class="state">
-      <p>先按大小筛选，再比较文件头尾，最后用完整内容的哈希逐一核对。</p>
-      <p class="muted">算过的结果会记下来，文件没变就不必再读。</p>
+      <p>{t("先按大小筛选，再比较文件头尾，最后用完整内容的哈希逐一核对。")}</p>
+      <p class="muted">{t("算过的结果会记下来，文件没变就不必再读。")}</p>
     </div>
   {:else if groups.length === 0}
     <div class="state">
-      <p>{result.groups.length > 0 ? "重复文件都已处理。" : "没有找到重复文件。"}</p>
+      <p>{result.groups.length > 0 ? t("重复文件都已处理。") : t("没有找到重复文件。")}</p>
       <p class="muted">
-        核对了 {result.candidates.toLocaleString()} 个大小相同的文件，用时 {(
-          result.elapsedMs / 1000
-        ).toFixed(1)} 秒。
+        {t("核对了 {n} 个大小相同的文件，用时 {s} 秒。", {
+          n: result.candidates.toLocaleString(),
+          s: (result.elapsedMs / 1000).toFixed(1),
+        })}
       </p>
     </div>
   {:else}
     <div class="summary">
       <span
-        ><strong>{groups.length.toLocaleString()} 组</strong>，全部只留一份可释放
+        ><strong>{t("{n} 组", { n: groups.length.toLocaleString() })}</strong>{t(
+          "，全部只留一份可释放",
+        )}
         <strong>{formatSize(wasted)}</strong></span
       >
       <span class="muted"
-        >用时 {(result.elapsedMs / 1000).toFixed(1)} 秒{result.skipped > 0
-          ? `，${result.skipped} 个文件读不了已跳过`
-          : ""}{result.moreGroups > 0 ? `，另有 ${result.moreGroups} 组较小的未列出` : ""}</span
+        >{t("用时 {s} 秒", { s: (result.elapsedMs / 1000).toFixed(1) })}{result.skipped > 0
+          ? t("，{n} 个文件读不了已跳过", { n: result.skipped })
+          : ""}{result.moreGroups > 0
+          ? t("，另有 {n} 组较小的未列出", { n: result.moreGroups })
+          : ""}</span
       >
-      <div class="keep" role="radiogroup" aria-label="每组保留">
-        <span>每组保留</span>
+      <div class="keep" role="radiogroup" aria-label={t("每组保留")}>
+        <span>{t("每组保留")}</span>
         {#each KEEP as k (k.key)}
           <button
             type="button"
@@ -304,7 +311,7 @@
             onclick={() => {
               keep = k.key;
               applyKeep();
-            }}>{k.label}</button
+            }}>{t(k.label)}</button
           >
         {/each}
       </div>
@@ -316,9 +323,11 @@
           <h3>
             <span class="name">{split(g.files[0].path).name}</span>
             <span class="muted"
-              >{formatSize(g.size)} × {g.files.length}，可释放 {formatSize(
-                g.size * (g.files.length - 1),
-              )}</span
+              >{t("{size} × {n}，可释放 {free}", {
+                size: formatSize(g.size),
+                n: g.files.length,
+                free: formatSize(g.size * (g.files.length - 1)),
+              })}</span
             >
           </h3>
           <ul>
@@ -332,23 +341,24 @@
                     toggle(g, f);
                     (e.currentTarget as HTMLInputElement).checked = marked.has(f.id);
                   }}
-                  aria-label="删除 {f.path}"
+                  aria-label={t("删除 {path}", { path: f.path })}
                 />
                 <button
                   type="button"
                   class="path"
-                  title="在主界面中定位"
+                  title={t("在主界面中定位")}
                   onclick={() => onreveal(f.id)}
                   ><span class="dir">{p.dir}</span><span>{p.name}</span></button
                 >
                 <span class="date"
                   >{#if f.links > 1}<span
                       class="link-note"
-                      title="这个文件还有 {f.links -
-                        1} 个其他名称（硬链接），删除这个名称不会释放空间">硬链接</span
+                      title={t("这个文件还有 {n} 个其他名称（硬链接），删除这个名称不会释放空间", {
+                        n: f.links - 1,
+                      })}>{t("硬链接")}</span
                     >{/if}{date(f.modifiedMs)}</span
                 >
-                <span class="tag">{marked.has(f.id) ? "" : "保留"}</span>
+                <span class="tag">{marked.has(f.id) ? "" : t("保留")}</span>
               </li>
             {/each}
           </ul>
@@ -358,18 +368,19 @@
 
     <footer>
       <span
-        >已勾选 <strong>{markedCount.toLocaleString()}</strong> 个文件，可释放
+        >{t("已勾选")} <strong>{markedCount.toLocaleString()}</strong>
+        {t("个文件，可释放")}
         <strong>{formatSize(markedSize)}</strong></span
       >
       <button type="button" class="link" onclick={() => marked.clear()} disabled={markedCount === 0}
-        >全部取消</button
+        >{t("全部取消")}</button
       >
       <button
         type="button"
         class="secondary"
         disabled={linkPlan.count === 0}
-        title="保留一份数据，其余位置换成指向它的硬链接，文件仍在原处"
-        onclick={() => (confirmLink = true)}>替换为硬链接…</button
+        title={t("保留一份数据，其余位置换成指向它的硬链接，文件仍在原处")}
+        onclick={() => (confirmLink = true)}>{t("替换为硬链接…")}</button
       >
       <button
         type="button"
@@ -377,7 +388,7 @@
         disabled={markedCount === 0}
         onclick={() =>
           onbasket(groups.flatMap((g) => g.files.filter((f) => marked.has(f.id)).map((f) => f.id)))}
-        >加入收集篮</button
+        >{t("加入收集篮")}</button
       >
       <button
         type="button"
@@ -385,7 +396,7 @@
         disabled={markedCount === 0}
         onclick={() =>
           ondelete(groups.flatMap((g) => g.files.filter((f) => marked.has(f.id)).map((f) => f.id)))}
-        >删除勾选的文件…</button
+        >{t("删除勾选的文件…")}</button
       >
     </footer>
   {/if}
@@ -400,23 +411,30 @@
     aria-labelledby="link-title"
     transition:fly={{ y: -24, duration: 220, easing: cubicOut }}
   >
-    <h2 id="link-title">要将 {linkPlan.count} 个文件替换为硬链接吗？</h2>
+    <h2 id="link-title">{t("要将 {n} 个文件替换为硬链接吗？", { n: linkPlan.count })}</h2>
     <p>
-      可释放 <strong>{formatSize(linkPlan.size)}</strong
-      >。这些文件仍留在原来的位置、照常打开，但会和保留的那份共用同一份数据：
-      <strong>修改其中任何一处，其余位置也会跟着变</strong>。
+      {t("可释放")} <strong>{formatSize(linkPlan.size)}</strong>{t(
+        "。这些文件仍留在原来的位置、照常打开，但会和保留的那份共用同一份数据：",
+      )}
+      <strong>{t("修改其中任何一处，其余位置也会跟着变")}</strong>{t("。")}
     </p>
     <p class="muted">
-      替换前会逐字节核对内容，不一致的不替换。被替换的副本不进回收站，因为同样的内容仍在保留的那份里。
+      {t(
+        "替换前会逐字节核对内容，不一致的不替换。被替换的副本不进回收站，因为同样的内容仍在保留的那份里。",
+      )}
     </p>
     {#if linkPlan.crossVolume > 0}
       <p class="muted">
-        另有 {linkPlan.crossVolume} 个文件与保留的那份不在同一个磁盘上，不能做硬链接，将跳过。
+        {t("另有 {n} 个文件与保留的那份不在同一个磁盘上，不能做硬链接，将跳过。", {
+          n: linkPlan.crossVolume,
+        })}
       </p>
     {/if}
     {#if linkPlan.linked > 0}
       <p class="muted">
-        另有 {linkPlan.linked} 个文件本身已有其他硬链接名称，替换也不释放空间，将跳过。
+        {t("另有 {n} 个文件本身已有其他硬链接名称，替换也不释放空间，将跳过。", {
+          n: linkPlan.linked,
+        })}
       </p>
     {/if}
     <div class="actions">
@@ -424,10 +442,10 @@
         type="button"
         class="secondary"
         onclick={() => (confirmLink = false)}
-        disabled={linking}>取消</button
+        disabled={linking}>{t("取消")}</button
       >
       <button type="button" class="primary" onclick={link} disabled={linking}
-        >{linking ? "正在替换…" : "替换为硬链接"}</button
+        >{linking ? t("正在替换…") : t("替换为硬链接")}</button
       >
     </div>
   </div>

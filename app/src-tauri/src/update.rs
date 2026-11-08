@@ -70,7 +70,7 @@ pub async fn check_update(app: AppHandle) -> Result<UpdateInfo, String> {
             body.extend_from_slice(chunk);
             Ok(())
         })
-        .map_err(|e| format!("无法连接 GitHub：{e}"))?;
+        .map_err(|e| dl_i18n::trf!("无法连接 GitHub：{e}", e = e))?;
         parse(&current, &String::from_utf8_lossy(&body))
     })
     .await
@@ -84,12 +84,13 @@ pub async fn download_update(
     on_progress: Channel<DownloadProgress>,
 ) -> Result<String, String> {
     if !installer.url.starts_with(DOWNLOADS) || !installer.name.ends_with("-setup.exe") {
-        return Err("只能下载 DiskLens 的安装程序".into());
+        return Err(dl_i18n::tr("只能下载 DiskLens 的安装程序").into());
     }
     CANCEL.store(false, Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(move || {
         let dir = download_dir();
-        std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建下载文件夹：{e}"))?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| dl_i18n::trf!("无法创建下载文件夹：{e}", e = e))?;
         let path = dir.join(&installer.name);
         let result = fetch(&installer, &path, &on_progress);
         if result.is_err() {
@@ -116,7 +117,7 @@ pub fn install_update(path: String, app: AppHandle) -> Result<(), String> {
             .extension()
             .is_none_or(|e| !e.eq_ignore_ascii_case("exe"))
     {
-        return Err("只能运行下载好的 DiskLens 安装程序".into());
+        return Err(dl_i18n::tr("只能运行下载好的 DiskLens 安装程序").into());
     }
     sys::open(&path)?;
     // 留一点时间让安装程序先启动起来。
@@ -131,7 +132,7 @@ pub fn install_update(path: String, app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn open_release_page(url: String) -> Result<(), String> {
     if !url.starts_with(RELEASES_PAGE) {
-        return Err("只能打开 DiskLens 的发布页".into());
+        return Err(dl_i18n::tr("只能打开 DiskLens 的发布页").into());
     }
     #[cfg(windows)]
     {
@@ -139,10 +140,10 @@ pub fn open_release_page(url: String) -> Result<(), String> {
             .arg(&url)
             .spawn()
             .map(|_| ())
-            .map_err(|e| format!("无法打开浏览器：{e}"))
+            .map_err(|e| dl_i18n::trf!("无法打开浏览器：{e}", e = e))
     }
     #[cfg(not(windows))]
-    Err("只在 Windows 上支持".into())
+    Err(dl_i18n::tr("只在 Windows 上支持").into())
 }
 
 /// 下载的安装程序放在 `%TEMP%\DiskLens-update`。
@@ -156,16 +157,17 @@ fn fetch(
     path: &Path,
     on_progress: &Channel<DownloadProgress>,
 ) -> Result<(), String> {
-    let mut file = std::fs::File::create(path).map_err(|e| format!("无法保存安装程序：{e}"))?;
+    let mut file =
+        std::fs::File::create(path).map_err(|e| dl_i18n::trf!("无法保存安装程序：{e}", e = e))?;
     let mut hasher = Sha256::new();
     let mut done = 0u64;
     let mut last: Option<Instant> = None;
     sys::get(&installer.url, &mut |chunk| {
         if CANCEL.load(Ordering::Relaxed) {
-            return Err("已取消".into());
+            return Err(dl_i18n::tr("已取消").into());
         }
         file.write_all(chunk)
-            .map_err(|e| format!("无法保存安装程序：{e}"))?;
+            .map_err(|e| dl_i18n::trf!("无法保存安装程序：{e}", e = e))?;
         hasher.update(chunk);
         done += chunk.len() as u64;
         if last.is_none_or(|l| l.elapsed() >= PROGRESS_EVERY) {
@@ -178,21 +180,23 @@ fn fetch(
         Ok(())
     })
     .map_err(|e| {
-        if e == "已取消" {
+        if e == dl_i18n::tr("已取消") {
             e
         } else {
-            format!("下载失败：{e}")
+            dl_i18n::trf!("下载失败：{e}", e = e)
         }
     })?;
-    file.flush().map_err(|e| format!("无法保存安装程序：{e}"))?;
+    file.flush()
+        .map_err(|e| dl_i18n::trf!("无法保存安装程序：{e}", e = e))?;
     let _ = on_progress.send(DownloadProgress {
         done,
         total: installer.size,
     });
     if done != installer.size {
-        return Err(format!(
-            "下载的文件大小不对（{done} 字节，应为 {} 字节），请重试",
-            installer.size
+        return Err(dl_i18n::trf!(
+            "下载的文件大小不对（{done} 字节，应为 {installer} 字节），请重试",
+            installer = installer.size,
+            done = done
         ));
     }
     if let Some(expected) = &installer.sha256 {
@@ -202,7 +206,7 @@ fn fetch(
             .map(|b| format!("{b:02x}"))
             .collect();
         if !actual.eq_ignore_ascii_case(expected) {
-            return Err("下载的文件校验不通过，可能下载过程中出了错，请重试".into());
+            return Err(dl_i18n::tr("下载的文件校验不通过，可能下载过程中出了错，请重试").into());
         }
     }
     Ok(())
@@ -232,7 +236,7 @@ struct Asset {
 
 fn parse(current: &str, body: &str) -> Result<UpdateInfo, String> {
     let r: Release = serde_json::from_str(body)
-        .map_err(|_| "GitHub 返回的内容看不懂，可能暂时不可用".to_string())?;
+        .map_err(|_| dl_i18n::tr("GitHub 返回的内容看不懂，可能暂时不可用").to_string())?;
     let latest = r.tag_name.trim_start_matches(['v', 'V']).to_string();
     let installer = r
         .assets
@@ -327,7 +331,7 @@ mod sys {
     /// HTTPS GET `url`（会自动跟随跳转），响应正文分块交给 `sink`；`sink` 返回错误时中止。
     /// 只有最终状态是 200 才算成功。
     pub fn get(url: &str, sink: &mut dyn FnMut(&[u8]) -> Result<(), String>) -> Result<(), String> {
-        let (host, path) = super::split_url(url).ok_or("网址不对")?;
+        let (host, path) = super::split_url(url).ok_or(dl_i18n::tr("网址不对"))?;
         let agent = wide(concat!("DiskLens/", env!("CARGO_PKG_VERSION")));
         let host = wide(host);
         let verb = wide("GET");
@@ -382,9 +386,11 @@ mod sys {
             );
             match status {
                 200 => {}
-                404 => return Err("还没有发布过任何版本，或文件已不存在".into()),
-                403 | 429 => return Err("GitHub 暂时限制了访问次数，请过一会儿再试".into()),
-                s => return Err(format!("GitHub 返回了错误（HTTP {s}）")),
+                404 => return Err(dl_i18n::tr("还没有发布过任何版本，或文件已不存在").into()),
+                403 | 429 => {
+                    return Err(dl_i18n::tr("GitHub 暂时限制了访问次数，请过一会儿再试").into());
+                }
+                s => return Err(dl_i18n::trf!("GitHub 返回了错误（HTTP {s}）", s = s)),
             }
             let mut buf = vec![0u8; 64 * 1024];
             loop {
@@ -424,7 +430,10 @@ mod sys {
         if r as isize > 32 {
             Ok(())
         } else {
-            Err(format!("无法启动安装程序：{}", last_error()))
+            Err(dl_i18n::trf!(
+                "无法启动安装程序：{last_error}",
+                last_error = last_error()
+            ))
         }
     }
 }
@@ -432,11 +441,11 @@ mod sys {
 #[cfg(not(windows))]
 mod sys {
     pub fn get(_: &str, _: &mut dyn FnMut(&[u8]) -> Result<(), String>) -> Result<(), String> {
-        Err("只在 Windows 上支持".into())
+        Err(dl_i18n::tr("只在 Windows 上支持").into())
     }
 
     pub fn open(_: &std::path::Path) -> Result<(), String> {
-        Err("只在 Windows 上支持".into())
+        Err(dl_i18n::tr("只在 Windows 上支持").into())
     }
 }
 

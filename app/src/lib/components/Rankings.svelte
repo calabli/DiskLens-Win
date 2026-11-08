@@ -3,6 +3,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { detached, search, type SearchHit } from "$lib/api";
   import { formatDate, formatSize } from "$lib/format";
+  import { t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     rootId: number;
@@ -25,16 +26,16 @@
 
   const COUNTS = [100, 500, 1000];
   const SIZES = [
-    { label: "全部大小", query: "" },
+    { label: tk("全部大小"), query: "" },
     { label: "≥ 10 MB", query: "size:>=10mb" },
     { label: "≥ 100 MB", query: "size:>=100mb" },
     { label: "≥ 1 GB", query: "size:>=1gb" },
   ];
   const AGES = [
-    { label: "半年", query: "6m" },
-    { label: "1 年", query: "1y" },
-    { label: "2 年", query: "2y" },
-    { label: "3 年", query: "3y" },
+    { label: tk("半年"), query: "6m" },
+    { label: tk("1 年"), query: "1y" },
+    { label: tk("2 年"), query: "2y" },
+    { label: tk("3 年"), query: "3y" },
   ];
 
   let mode = $state<Mode>("largest");
@@ -101,27 +102,31 @@
   }
 </script>
 
-<section class="rank" aria-label="排行">
+<section class="rank" aria-label={t("排行")}>
   <header>
     <div class="title">
-      <h2>排行</h2>
-      <span>{rootName} 中{mode === "largest" ? "最大的文件" : "很久没用过的大文件"}</span>
+      <h2>{t("排行")}</h2>
+      <span
+        >{mode === "largest"
+          ? t("{root} 中最大的文件", { root: rootName })
+          : t("{root} 中很久没用过的大文件", { root: rootName })}</span
+      >
     </div>
-    <div class="seg" role="radiogroup" aria-label="排行类型">
+    <div class="seg" role="radiogroup" aria-label={t("排行类型")}>
       <button
         type="button"
         role="radio"
         aria-checked={mode === "largest"}
-        onclick={() => (mode = "largest")}>最大的文件</button
+        onclick={() => (mode = "largest")}>{t("最大的文件")}</button
       >
       <button
         type="button"
         role="radio"
         aria-checked={mode === "unused"}
-        onclick={() => (mode = "unused")}>长期未使用</button
+        onclick={() => (mode = "unused")}>{t("长期未使用")}</button
       >
     </div>
-    <button type="button" class="close" onclick={onclose} aria-label="关闭">
+    <button type="button" class="close" onclick={onclose} aria-label={t("关闭")}>
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
         ><path
           d="m4 4 8 8M12 4l-8 8"
@@ -136,34 +141,34 @@
   <div class="controls">
     {#if mode === "unused"}
       <label
-        >超过
+        >{t("超过")}
         <select bind:value={age}>
-          {#each AGES as a (a.query)}<option value={a.query}>{a.label}</option>{/each}
+          {#each AGES as a (a.query)}<option value={a.query}>{t(a.label)}</option>{/each}
         </select>
-        没有
+        {t("没有")}
         <select bind:value={by}>
-          <option value="da">访问</option>
-          <option value="dm">修改</option>
+          <option value="da">{t("访问")}</option>
+          <option value="dm">{t("修改")}</option>
         </select>
       </label>
     {/if}
     <label
-      >大小
+      >{t("大小")}
       <select bind:value={size}>
-        {#each SIZES as s (s.query)}<option value={s.query}>{s.label}</option>{/each}
+        {#each SIZES as s (s.query)}<option value={s.query}>{t(s.label)}</option>{/each}
       </select>
     </label>
     <label
-      >最多
+      >{t("最多")}
       <select bind:value={count}>
-        {#each COUNTS as c (c)}<option value={c}>{c} 个</option>{/each}
+        {#each COUNTS as c (c)}<option value={c}>{t("{n} 个", { n: c })}</option>{/each}
       </select>
     </label>
-    <span class="query" title="对应的搜索条件，可以在搜索框里使用">{query}</span>
+    <span class="query" title={t("对应的搜索条件，可以在搜索框里使用")}>{query}</span>
   </div>
   {#if mode === "unused" && by === "da"}
     <p class="note">
-      Windows 默认可能不及时更新“访问时间”。如果结果看起来不对，可以改按修改时间判断。
+      {t("Windows 默认可能不及时更新“访问时间”。如果结果看起来不对，可以改按修改时间判断。")}
     </p>
   {/if}
 
@@ -172,7 +177,7 @@
   {/if}
 
   {#if hits && shown.length === 0 && !running}
-    <div class="state"><p>没有符合条件的文件。</p></div>
+    <div class="state"><p>{t("没有符合条件的文件。")}</p></div>
   {:else}
     <ol class="list" aria-busy={running}>
       {#each shown as h, i (h.id)}
@@ -182,14 +187,22 @@
             type="checkbox"
             checked={marked.has(h.id)}
             onchange={() => toggle(h.id)}
-            aria-label="删除 {h.path}"
+            aria-label={t("删除 {path}", { path: h.path })}
           />
           <span class="no">{i + 1}</span>
-          <button type="button" class="path" title="在主界面中定位" onclick={() => onreveal(h.id)}
+          <button
+            type="button"
+            class="path"
+            title={t("在主界面中定位")}
+            onclick={() => onreveal(h.id)}
             ><span class="dir">{p.dir}</span><span>{p.name}</span></button
           >
-          <span class="date" title="修改 {formatDate(h.modified)}，访问 {formatDate(h.accessed)}"
-            >{formatDate(mode === "unused" && by === "da" ? h.accessed : h.modified)}</span
+          <span
+            class="date"
+            title={t("修改 {modified}，访问 {accessed}", {
+              modified: formatDate(h.modified),
+              accessed: formatDate(h.accessed),
+            })}>{formatDate(mode === "unused" && by === "da" ? h.accessed : h.modified)}</span
           >
           <span class="size">{formatSize(h.size)}</span>
         </li>
@@ -199,20 +212,24 @@
 
   <footer>
     <span
-      >共 {shown.length.toLocaleString()} 个，{formatSize(totalSize)}；已勾选
-      <strong>{marked.size}</strong> 个，<strong>{formatSize(markedSize)}</strong></span
+      >{t("共 {n} 个，{size}；已勾选", {
+        n: shown.length.toLocaleString(),
+        size: formatSize(totalSize),
+      })}
+      <strong>{marked.size}</strong>
+      {t("个，")}<strong>{formatSize(markedSize)}</strong></span
     >
     <button
       type="button"
       class="secondary"
       disabled={marked.size === 0}
-      onclick={() => onbasket([...marked])}>加入收集篮</button
+      onclick={() => onbasket([...marked])}>{t("加入收集篮")}</button
     >
     <button
       type="button"
       class="primary"
       disabled={marked.size === 0}
-      onclick={() => ondelete([...marked])}>删除勾选的文件…</button
+      onclick={() => ondelete([...marked])}>{t("删除勾选的文件…")}</button
     >
   </footer>
 </section>

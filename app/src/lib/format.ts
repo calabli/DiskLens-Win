@@ -1,3 +1,5 @@
+import { locale, t } from "./i18n.svelte";
+
 const UNITS = ["B", "KB", "MB", "GB", "TB"];
 
 /** 把字节数格式化为 1024 进制的可读大小，例如 1.5 GB。 */
@@ -14,17 +16,17 @@ export function formatSize(bytes: number): string {
 /** 距今多久，例如“刚刚”“5 分钟前”“昨天 14:05”“10月3日 09:30”。 */
 export function formatAgo(ms: number, now = Date.now()): string {
   const minutes = Math.floor((now - ms) / 60_000);
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes} 分钟前`;
-  if (minutes < 6 * 60) return `${Math.floor(minutes / 60)} 小时前`;
+  if (minutes < 1) return t("刚刚");
+  if (minutes < 60) return t("{n} 分钟前", { n: minutes });
+  if (minutes < 6 * 60) return t("{n} 小时前", { n: Math.floor(minutes / 60) });
   const date = new Date(ms);
-  const time = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const time = date.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const days = Math.ceil((today.getTime() - ms) / 86_400_000);
-  if (days <= 0) return `今天 ${time}`;
-  if (days === 1) return `昨天 ${time}`;
-  return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
+  if (days <= 0) return t("今天 {time}", { time });
+  if (days === 1) return t("昨天 {time}", { time });
+  return `${date.toLocaleDateString(locale(), { month: "short", day: "numeric" })} ${time}`;
 }
 
 /** Unix 秒格式化为日期，例如 2026/10/27；0 表示未知，显示为“—”。 */

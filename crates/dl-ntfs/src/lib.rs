@@ -45,13 +45,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "读取卷失败：{e}"),
-            Self::AccessDenied => f.write_str("需要管理员权限才能直接读取卷"),
-            Self::NotNtfs => f.write_str("不是 NTFS 卷"),
-            Self::Corrupt(what) => write!(f, "MFT 数据异常：{what}"),
-            Self::Unsupported(what) => write!(f, "暂不支持：{what}"),
-            Self::Cancelled => f.write_str("扫描已取消"),
-            Self::Journal(why) => write!(f, "无法增量刷新：{why}"),
+            Self::Io(e) => f.write_str(&dl_i18n::trf!("读取卷失败：{e}", e = e)),
+            Self::AccessDenied => f.write_str(dl_i18n::tr("需要管理员权限才能直接读取卷")),
+            Self::NotNtfs => f.write_str(dl_i18n::tr("不是 NTFS 卷")),
+            Self::Corrupt(what) => f.write_str(&dl_i18n::trf!("MFT 数据异常：{what}", what = what)),
+            Self::Unsupported(what) => f.write_str(&dl_i18n::trf!("暂不支持：{what}", what = what)),
+            Self::Cancelled => f.write_str(dl_i18n::tr("扫描已取消")),
+            Self::Journal(why) => f.write_str(&dl_i18n::trf!("无法增量刷新：{why}", why = why)),
         }
     }
 }

@@ -2,6 +2,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { devProjects, type ProjectInfo } from "$lib/api";
   import { formatAgo, formatSize } from "$lib/format";
+  import { t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     rootId: number;
@@ -20,10 +21,10 @@
   /** 多久没改算“很久没动”。 */
   const STALE_DAYS = 90;
   const AGES = [
-    { days: 0, label: "全部项目" },
-    { days: 90, label: "90 天没改过" },
-    { days: 180, label: "半年没改过" },
-    { days: 365, label: "一年没改过" },
+    { days: 0, label: tk("全部项目") },
+    { days: 90, label: tk("90 天没改过") },
+    { days: 180, label: tk("半年没改过") },
+    { days: 365, label: tk("一年没改过") },
   ];
 
   let list = $state<ProjectInfo[] | null>(null);
@@ -71,15 +72,18 @@
   }
 </script>
 
-<section class="projects" aria-label="开发项目">
+<section class="projects" aria-label={t("开发项目")}>
   <header>
     <div class="title">
-      <h2>开发项目</h2>
+      <h2>{t("开发项目")}</h2>
       <span
-        >在 {rootName} 中找出开发项目，以及可以删掉、之后能重新生成的依赖包和编译输出。删掉后再运行项目时，按提示重新安装或编译就行。</span
+        >{t(
+          "在 {root} 中找出开发项目，以及可以删掉、之后能重新生成的依赖包和编译输出。删掉后再运行项目时，按提示重新安装或编译就行。",
+          { root: rootName },
+        )}</span
       >
     </div>
-    <button type="button" class="close" onclick={onclose} aria-label="关闭">
+    <button type="button" class="close" onclick={onclose} aria-label={t("关闭")}>
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
         ><path
           d="m4 4 8 8M12 4l-8 8"
@@ -92,18 +96,20 @@
   </header>
 
   <div class="bar">
-    <select bind:value={age} aria-label="按最后修改时间筛选">
+    <select bind:value={age} aria-label={t("按最后修改时间筛选")}>
       {#each AGES as a (a.days)}
-        <option value={a.days}>{a.label}</option>
+        <option value={a.days}>{t(a.label)}</option>
       {/each}
     </select>
     <label class="check">
       <input type="checkbox" bind:checked={showEmpty} />
-      也显示没有构建产物的项目
+      {t("也显示没有构建产物的项目")}
     </label>
-    <button type="button" class="link" onclick={markAll} disabled={shown.length === 0}>全选</button>
+    <button type="button" class="link" onclick={markAll} disabled={shown.length === 0}
+      >{t("全选")}</button
+    >
     <button type="button" class="link" onclick={() => marked.clear()} disabled={marked.size === 0}
-      >全部取消</button
+      >{t("全部取消")}</button
     >
   </div>
 
@@ -113,10 +119,12 @@
 
   <div class="scroll">
     {#if list === null}
-      <p class="muted">正在查找项目…</p>
+      <p class="muted">{t("正在查找项目…")}</p>
     {:else if shown.length === 0}
       <p class="muted">
-        {list.length === 0 ? `${rootName} 里没有找到开发项目。` : "没有符合条件的项目。"}
+        {list.length === 0
+          ? t("{root} 里没有找到开发项目。", { root: rootName })
+          : t("没有符合条件的项目。")}
       </p>
     {:else}
       <ul>
@@ -128,21 +136,21 @@
               checked={marked.has(p.id)}
               disabled={p.reclaimable === 0}
               onchange={() => toggle(p)}
-              aria-label="选择 {name(p.path)}"
+              aria-label={t("选择 {name}", { name: name(p.path) })}
             />
             <div class="main">
               <div class="line">
                 <button
                   type="button"
                   class="name"
-                  title="在主界面中定位"
+                  title={t("在主界面中定位")}
                   onclick={() => onreveal(p.id)}>{name(p.path)}</button
                 >
                 {#each p.kinds as k (k)}
                   <span class="kind">{k}</span>
                 {/each}
                 {#if days >= STALE_DAYS}
-                  <span class="stale">{days} 天没改过</span>
+                  <span class="stale">{t("{n} 天没改过", { n: days })}</span>
                 {/if}
               </div>
               <span class="path" title={p.path}>{p.path}</span>
@@ -151,18 +159,20 @@
                   <button
                     type="button"
                     class="artifact"
-                    title="在主界面中定位"
+                    title={t("在主界面中定位")}
                     onclick={() => onreveal(a.id)}>{a.name} <b>{formatSize(a.size)}</b></button
                   >
                 {:else}
-                  <span class="muted">没有构建产物</span>
+                  <span class="muted">{t("没有构建产物")}</span>
                 {/each}
               </div>
             </div>
             <div class="side">
               <strong>{formatSize(p.reclaimable)}</strong>
               <span class="muted"
-                >{p.modified > 0 ? `${formatAgo(p.modified * 1000)}改过` : "修改时间未知"}</span
+                >{p.modified > 0
+                  ? t("{ago}改过", { ago: formatAgo(p.modified * 1000) })
+                  : t("修改时间未知")}</span
               >
             </div>
           </li>
@@ -173,21 +183,25 @@
 
   <footer>
     <span
-      >共 {shown.length.toLocaleString()} 个项目，构建产物 {formatSize(totalReclaimable)}；已选
-      <strong>{markedList.length}</strong> 个，可释放
+      >{t("共 {n} 个项目，构建产物 {size}；已选", {
+        n: shown.length.toLocaleString(),
+        size: formatSize(totalReclaimable),
+      })}
+      <strong>{markedList.length}</strong>
+      {t("个，可释放")}
       <strong>{formatSize(markedSize)}</strong></span
     >
     <button
       type="button"
       class="secondary"
       disabled={markedArtifacts.length === 0}
-      onclick={() => onbasket(markedArtifacts)}>加入收集篮</button
+      onclick={() => onbasket(markedArtifacts)}>{t("加入收集篮")}</button
     >
     <button
       type="button"
       class="primary"
       disabled={markedArtifacts.length === 0}
-      onclick={() => ondelete(markedArtifacts)}>删除所选项目的构建产物…</button
+      onclick={() => ondelete(markedArtifacts)}>{t("删除所选项目的构建产物…")}</button
     >
   </footer>
 </section>

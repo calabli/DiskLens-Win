@@ -21,23 +21,25 @@ struct Identity {
 
 /// 把 `target` 替换为指向 `source` 的硬链接。两者已经是同一个文件时什么也不做，返回 `false`。
 pub fn replace_with_hardlink(source: &Path, target: &Path) -> Result<bool, String> {
-    let (src_meta, src_id) = inspect(source).map_err(|e| format!("无法读取保留的那份：{e}"))?;
-    let (dst_meta, dst_id) = inspect(target).map_err(|e| format!("无法读取：{e}"))?;
+    let (src_meta, src_id) =
+        inspect(source).map_err(|e| dl_i18n::trf!("无法读取保留的那份：{e}", e = e))?;
+    let (dst_meta, dst_id) = inspect(target).map_err(|e| dl_i18n::trf!("无法读取：{e}", e = e))?;
     if src_id == dst_id {
         return Ok(false);
     }
     if src_id.volume != dst_id.volume {
-        return Err("两个文件不在同一个磁盘上，不能用硬链接".into());
+        return Err(dl_i18n::tr("两个文件不在同一个磁盘上，不能用硬链接").into());
     }
     if src_meta.len() != dst_meta.len() {
-        return Err("大小已经不同，可能在查重后被修改过，没有替换".into());
+        return Err(dl_i18n::tr("大小已经不同，可能在查重后被修改过，没有替换").into());
     }
-    if !same_content(source, target).map_err(|e| format!("核对内容时出错：{e}"))? {
-        return Err("内容已经不同，可能在查重后被修改过，没有替换".into());
+    if !same_content(source, target).map_err(|e| dl_i18n::trf!("核对内容时出错：{e}", e = e))?
+    {
+        return Err(dl_i18n::tr("内容已经不同，可能在查重后被修改过，没有替换").into());
     }
 
     let tmp = temp_name(target);
-    fs::hard_link(source, &tmp).map_err(|e| format!("无法创建硬链接：{e}"))?;
+    fs::hard_link(source, &tmp).map_err(|e| dl_i18n::trf!("无法创建硬链接：{e}", e = e))?;
     let result = (|| {
         // 只读文件不能被改名覆盖。
         if dst_meta.permissions().readonly() {
@@ -50,11 +52,11 @@ pub fn replace_with_hardlink(source: &Path, target: &Path) -> Result<bool, Strin
     })();
     if let Err(e) = result {
         let _ = fs::remove_file(&tmp);
-        return Err(format!("替换失败：{e}"));
+        return Err(dl_i18n::trf!("替换失败：{e}", e = e));
     }
     match inspect(target) {
         Ok((_, id)) if id == src_id => Ok(true),
-        _ => Err("替换后核对失败".into()),
+        _ => Err(dl_i18n::tr("替换后核对失败").into()),
     }
 }
 
@@ -62,7 +64,10 @@ fn inspect(path: &Path) -> io::Result<(fs::Metadata, Identity)> {
     let file = File::open(path)?;
     let meta = file.metadata()?;
     if !meta.is_file() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "不是文件"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            dl_i18n::tr("不是文件"),
+        ));
     }
     Ok((meta.clone(), sys::identity(&file, &meta)?))
 }

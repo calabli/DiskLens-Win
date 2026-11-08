@@ -86,7 +86,7 @@ pub fn open_volume(letter: char) -> Result<std::fs::File> {
     const FILE_SHARE_WRITE: u32 = 0x2;
 
     if !letter.is_ascii_alphabetic() {
-        return Err(Error::Unsupported("盘符无效"));
+        return Err(Error::Unsupported(dl_i18n::tr("盘符无效")));
     }
     let path = format!(r"\\.\{}:", letter.to_ascii_uppercase());
     Ok(std::fs::OpenOptions::new()
@@ -147,9 +147,9 @@ pub fn scan_reader_with_threads<R: ReadAt + Sync + ?Sized>(
     dev.read_exact_at(&mut first, boot.mft_lcn * cluster)?;
     let mft = parse_record(&mut first[..rs], true)?.ok_or(Error::Corrupt("$MFT record"))?;
     if mft.has_attribute_list {
-        return Err(Error::Unsupported(
+        return Err(Error::Unsupported(dl_i18n::tr(
             "$MFT 高度碎片化，data runs 分散在多条记录中",
-        ));
+        )));
     }
     let data = mft
         .streams

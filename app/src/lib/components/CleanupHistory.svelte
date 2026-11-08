@@ -2,6 +2,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { cleanupHistory, restoreItems, type HistoryGroup, type HistoryItem } from "$lib/api";
   import { formatAgo, formatSize } from "$lib/format";
+  import { locale, t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     /** 数据版本；删除、清理或刷新后递增，重新读取记录。 */
@@ -17,22 +18,22 @@
   const FIRST = 12;
 
   const ACTION: Record<string, string> = {
-    recycle: "移到回收站",
-    delete: "彻底删除",
-    hardlink: "替换为硬链接",
-    move: "移到其他磁盘",
-    restore: "放回原处",
+    recycle: tk("移到回收站"),
+    delete: tk("彻底删除"),
+    hardlink: tk("替换为硬链接"),
+    move: tk("移到其他磁盘"),
+    restore: tk("放回原处"),
   };
 
   const STATUS: Record<string, { label: string; tone: string }> = {
-    inBin: { label: "在回收站", tone: "accent" },
-    occupied: { label: "原处已有同名项目", tone: "muted" },
-    gone: { label: "回收站已清空", tone: "muted" },
-    deleted: { label: "已彻底删除", tone: "muted" },
-    notDone: { label: "没有删除", tone: "warn" },
-    linked: { label: "已替换为硬链接", tone: "muted" },
-    moved: { label: "已移走", tone: "muted" },
-    restored: { label: "已放回", tone: "good" },
+    inBin: { label: tk("在回收站"), tone: "accent" },
+    occupied: { label: tk("原处已有同名项目"), tone: "muted" },
+    gone: { label: tk("回收站已清空"), tone: "muted" },
+    deleted: { label: tk("已彻底删除"), tone: "muted" },
+    notDone: { label: tk("没有删除"), tone: "warn" },
+    linked: { label: tk("已替换为硬链接"), tone: "muted" },
+    moved: { label: tk("已移走"), tone: "muted" },
+    restored: { label: tk("已放回"), tone: "good" },
   };
 
   let groups = $state<HistoryGroup[] | null>(null);
@@ -74,12 +75,13 @@
     try {
       const r = await restoreItems(items.map((i) => ({ time: i.time, path: i.path })));
       const failed = r.failed.slice(0, 5).map((f) => `${f.path}：${f.reason}`);
-      if (r.failed.length > 5) failed.push(`另有 ${r.failed.length - 5} 项没能放回`);
+      if (r.failed.length > 5) failed.push(t("另有 {n} 项没能放回", { n: r.failed.length - 5 }));
       notice = {
         message:
           r.restored.length > 0
-            ? `已放回原处 ${r.restored.length} 项${r.failed.length > 0 ? `，${r.failed.length} 项没能放回` : ""}`
-            : "没有放回任何项目",
+            ? t("已放回原处 {n} 项", { n: r.restored.length }) +
+              (r.failed.length > 0 ? t("，{n} 项没能放回", { n: r.failed.length }) : "")
+            : t("没有放回任何项目"),
         detail: [...failed, ...(r.logError ? [r.logError] : [])],
         tone: r.failed.length > 0 || r.logError ? "warn" : "good",
       };
@@ -93,15 +95,17 @@
   }
 </script>
 
-<section class="history" aria-label="清理记录">
+<section class="history" aria-label={t("清理记录")}>
   <header>
     <div class="title">
-      <h2>清理记录</h2>
+      <h2>{t("清理记录")}</h2>
       <span
-        >每次删除、硬链接替换和移动都记在这里。移到回收站的项目，回收站清空之前都可以放回原处。</span
+        >{t(
+          "每次删除、硬链接替换和移动都记在这里。移到回收站的项目，回收站清空之前都可以放回原处。",
+        )}</span
       >
     </div>
-    <button type="button" class="close" onclick={onclose} aria-label="关闭">
+    <button type="button" class="close" onclick={onclose} aria-label={t("关闭")}>
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
         ><path
           d="m4 4 8 8M12 4l-8 8"
@@ -127,12 +131,16 @@
 
   <div class="scroll">
     {#if groups === null}
-      <p class="empty">正在读取记录…</p>
+      <p class="empty">{t("正在读取记录…")}</p>
     {:else if groups.length === 0}
-      <p class="empty">还没有清理记录。删除、清理、硬链接替换或移动文件夹之后，会在这里列出来。</p>
+      <p class="empty">
+        {t("还没有清理记录。删除、清理、硬链接替换或移动文件夹之后，会在这里列出来。")}
+      </p>
     {:else}
       {#if inBinCount > 0}
-        <p class="summary">共有 {inBinCount.toLocaleString()} 项还在回收站里，可以放回原处。</p>
+        <p class="summary">
+          {t("共有 {n} 项还在回收站里，可以放回原处。", { n: inBinCount.toLocaleString() })}
+        </p>
       {/if}
       {#each groups as g, gi (gi)}
         {@const ok = g.items.filter((i) => i.status !== "notDone")}
@@ -141,17 +149,18 @@
         <article class="group">
           <div class="group-head">
             <div class="group-title">
-              <h3>{ACTION[g.action] ?? g.action}</h3>
-              <span title={new Date(g.time).toLocaleString("zh-CN")}
-                >{formatAgo(new Date(g.time).getTime())} · {ok.length.toLocaleString()} 项{g.size >
-                0
-                  ? ` · ${formatSize(g.size)}`
-                  : ""}{notDone > 0 ? ` · ${notDone} 项没有删除` : ""}</span
+              <h3>{ACTION[g.action] ? t(ACTION[g.action]) : g.action}</h3>
+              <span title={new Date(g.time).toLocaleString(locale())}
+                >{formatAgo(new Date(g.time).getTime())} · {t("{n} 项", {
+                  n: ok.length.toLocaleString(),
+                })}{g.size > 0 ? ` · ${formatSize(g.size)}` : ""}{notDone > 0
+                  ? ` · ${t("{n} 项没有删除", { n: notDone })}`
+                  : ""}</span
               >
             </div>
             {#if back.length > 1}
               <button type="button" class="secondary" disabled={busy} onclick={() => restore(back)}
-                >全部放回（{back.length.toLocaleString()}）</button
+                >{t("全部放回（{n}）", { n: back.length.toLocaleString() })}</button
               >
             {/if}
           </div>
@@ -164,14 +173,14 @@
                   <span class="path" title={item.path}
                     >{item.linkTo
                       ? `${folder(item.path)} → ${item.linkTo}`
-                      : folder(item.path)}{item.reason ? ` · ${item.reason}` : ""}</span
+                      : folder(item.path)}{item.reason ? ` · ${t(item.reason)}` : ""}</span
                   >
                 </div>
                 <span class="size">{item.size > 0 ? formatSize(item.size) : ""}</span>
-                <span class="status {st?.tone ?? 'muted'}">{st?.label ?? item.status}</span>
+                <span class="status {st?.tone ?? 'muted'}">{st ? t(st.label) : item.status}</span>
                 {#if item.status === "inBin"}
                   <button type="button" class="link" disabled={busy} onclick={() => restore([item])}
-                    >放回原处</button
+                    >{t("放回原处")}</button
                   >
                 {:else}
                   <span class="link-space"></span>
@@ -185,8 +194,8 @@
               class="more"
               onclick={() => (opened.has(gi) ? opened.delete(gi) : opened.add(gi))}
               >{opened.has(gi)
-                ? "收起"
-                : `展开其余 ${(g.items.length - FIRST).toLocaleString()} 项`}</button
+                ? t("收起")
+                : t("展开其余 {n} 项", { n: (g.items.length - FIRST).toLocaleString() })}</button
             >
           {/if}
         </article>

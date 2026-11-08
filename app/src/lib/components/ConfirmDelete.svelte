@@ -3,6 +3,7 @@
   import { cubicOut } from "svelte/easing";
   import type { BusyRule, DeletePlan, DeleteProgress } from "$lib/api";
   import { formatSize } from "$lib/format";
+  import { t } from "$lib/i18n.svelte";
 
   interface Props {
     /** 按规则清理时另外带上因程序正在运行而跳过的规则。 */
@@ -34,12 +35,22 @@
   });
 
   const progressText = $derived.by(() => {
-    const time = elapsed > 0 ? ` · 已用 ${elapsed} 秒` : "";
-    if (!progress) return `正在准备…${time}`;
+    const time = elapsed > 0 ? t(" · 已用 {s} 秒", { s: elapsed }) : "";
+    if (!progress) return t("正在准备…") + time;
     if (permanent) {
-      return `正在彻底删除：${formatSize(progress.doneBytes)} / ${formatSize(progress.totalBytes)}，${progress.doneFiles.toLocaleString()} / ${progress.totalFiles.toLocaleString()} 个文件${time}`;
+      return (
+        t("正在彻底删除：{done} / {total}，{files} / {totalFiles} 个文件", {
+          done: formatSize(progress.doneBytes),
+          total: formatSize(progress.totalBytes),
+          files: progress.doneFiles.toLocaleString(),
+          totalFiles: progress.totalFiles.toLocaleString(),
+        }) + time
+      );
     }
-    return `正在移到回收站：第 ${progress.item + 1} / ${progress.items} 项${time}`;
+    return (
+      t("正在移到回收站：第 {n} / {total} 项", { n: progress.item + 1, total: progress.items }) +
+      time
+    );
   });
 
   /** 清单最多列出的项数（清理临时文件时可能有成千上万项）。 */
@@ -55,15 +66,15 @@
   const title = $derived(
     deletable.length === 0
       ? plan.items.length === 1
-        ? `不能删除“${first.name}”`
-        : `不能删除这 ${plan.items.length} 项`
+        ? t("不能删除“{name}”", { name: first.name })
+        : t("不能删除这 {n} 项", { n: plan.items.length })
       : deletable.length === 1
         ? permanent
-          ? `要彻底删除“${first.name}”吗？`
-          : `要将“${first.name}”移到回收站吗？`
+          ? t("要彻底删除“{name}”吗？", { name: first.name })
+          : t("要将“{name}”移到回收站吗？", { name: first.name })
         : permanent
-          ? `要彻底删除这 ${deletable.length} 项吗？`
-          : `要将这 ${deletable.length} 项移到回收站吗？`,
+          ? t("要彻底删除这 {n} 项吗？", { n: deletable.length })
+          : t("要将这 {n} 项移到回收站吗？", { n: deletable.length }),
   );
   const canConfirm = $derived(deletable.length > 0 && !busy && (!permanent || understood));
 
@@ -116,24 +127,26 @@
           </li>
         {/each}
         {#if deletable.length > MAX_LISTED}
-          <li class="more">另有 {(deletable.length - MAX_LISTED).toLocaleString()} 项</li>
+          <li class="more">
+            {t("另有 {n} 项", { n: (deletable.length - MAX_LISTED).toLocaleString() })}
+          </li>
         {/if}
       </ul>
     {/if}
     {#if deletable.length > 0}
       <p>
         {formatSize(plan.totalSize)}{plan.totalFiles > 1
-          ? `，${plan.totalFiles.toLocaleString()} 个文件`
-          : ""}。{permanent ? "彻底删除后无法恢复。" : "之后可以在回收站中恢复。"}
+          ? t("，{n} 个文件", { n: plan.totalFiles.toLocaleString() })
+          : ""}{t("。")}{permanent ? t("彻底删除后无法恢复。") : t("之后可以在回收站中恢复。")}
       </p>
     {/if}
     {#if blocked.length > 0}
       <div class="blocked-list">
         {#if deletable.length > 0}
-          <p>以下 {blocked.length} 项不能删除，会被跳过：</p>
+          <p>{t("以下 {n} 项不能删除，会被跳过：", { n: blocked.length })}</p>
         {/if}
         {#each blocked as item (item.id)}
-          <p class="blocked"><strong>{item.name}</strong>：{item.blocked}</p>
+          <p class="blocked"><strong>{item.name}</strong>{t("：")}{item.blocked}</p>
         {/each}
       </div>
     {/if}
@@ -141,7 +154,12 @@
       <div class="blocked-list">
         {#each plan.busy as r (r.name)}
           <p class="running">
-            <strong>{r.name}</strong>：{r.app} 正在运行，这次先跳过。退出 {r.app} 后再清理。
+            <strong>{r.name}</strong>{t("：")}{t(
+              "{app} 正在运行，这次先跳过。退出 {app} 后再清理。",
+              {
+                app: r.app,
+              },
+            )}
           </p>
         {/each}
       </div>
@@ -157,35 +175,36 @@
       {/if}
     </div>
   {:else if deletable.length > 0}
-    <div class="modes" role="radiogroup" aria-label="删除方式">
+    <div class="modes" role="radiogroup" aria-label={t("删除方式")}>
       <button
         type="button"
         role="radio"
         aria-checked={!permanent}
         class:on={!permanent}
-        onclick={() => (permanent = false)}>移到回收站</button
+        onclick={() => (permanent = false)}>{t("移到回收站")}</button
       >
       <button
         type="button"
         role="radio"
         aria-checked={permanent}
         class:on={permanent}
-        onclick={() => (permanent = true)}>彻底删除</button
+        onclick={() => (permanent = true)}>{t("彻底删除")}</button
       >
     </div>
     {#if permanent}
       <label class="ack">
         <input type="checkbox" bind:checked={understood} />
-        我了解彻底删除后无法恢复
+        {t("我了解彻底删除后无法恢复")}
       </label>
     {/if}
   {/if}
 
-  <p class="log">每次操作都会记录到日志：{plan.logDir}</p>
+  <p class="log">{t("每次操作都会记录到日志：{dir}", { dir: plan.logDir })}</p>
 
   <div class="actions">
     {#if deletable.length > 0}
-      <button type="button" class="secondary" onclick={oncancel} disabled={busy}>取消</button>
+      <button type="button" class="secondary" onclick={oncancel} disabled={busy}>{t("取消")}</button
+      >
       <button
         type="button"
         class="primary"
@@ -194,10 +213,12 @@
         disabled={!canConfirm}
         onclick={() => onconfirm(permanent)}
       >
-        {busy ? "正在删除…" : permanent ? "彻底删除" : "移到回收站"}
+        {busy ? t("正在删除…") : permanent ? t("彻底删除") : t("移到回收站")}
       </button>
     {:else}
-      <button type="button" class="primary" bind:this={primary} onclick={oncancel}>知道了</button>
+      <button type="button" class="primary" bind:this={primary} onclick={oncancel}
+        >{t("知道了")}</button
+      >
     {/if}
   </div>
 </div>

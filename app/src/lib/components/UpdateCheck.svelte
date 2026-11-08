@@ -10,6 +10,7 @@
     type UpdateInfo,
   } from "$lib/api";
   import { formatSize } from "$lib/format";
+  import { locale, t } from "$lib/i18n.svelte";
 
   interface Props {
     onclose: () => void;
@@ -93,7 +94,7 @@
       await installUpdate(path);
     } catch (e) {
       phase = "idle";
-      if (String(e) !== "已取消") installError = String(e);
+      if (String(e) !== t("已取消")) installError = String(e);
     }
   }
 
@@ -128,18 +129,22 @@
   transition:fly={{ y: -24, duration: 220, easing: cubicOut }}
 >
   {#if checking}
-    <h2 id="update-title">正在检查更新…</h2>
-    <p class="muted">正在向 GitHub 查询最新发布的版本。</p>
+    <h2 id="update-title">{t("正在检查更新…")}</h2>
+    <p class="muted">{t("正在向 GitHub 查询最新发布的版本。")}</p>
   {:else if error}
-    <h2 id="update-title">没能检查更新</h2>
+    <h2 id="update-title">{t("没能检查更新")}</h2>
     <p class="error">{error}</p>
-    <p class="muted">请确认网络能访问 GitHub；用了代理的话，DiskLens 会使用系统的代理设置。</p>
-  {:else if info?.newer}
-    <h2 id="update-title">有新版本 {info.latest}</h2>
     <p class="muted">
-      你现在用的是 {info.current}{info.publishedAt
-        ? `，新版本发布于 ${new Date(info.publishedAt).toLocaleDateString("zh-CN")}`
-        : ""}。下载安装后会覆盖旧版本，扫描结果和设置都会保留。
+      {t("请确认网络能访问 GitHub；用了代理的话，DiskLens 会使用系统的代理设置。")}
+    </p>
+  {:else if info?.newer}
+    <h2 id="update-title">{t("有新版本 {version}", { version: info.latest })}</h2>
+    <p class="muted">
+      {t("你现在用的是 {version}", { version: info.current })}{info.publishedAt
+        ? t("，新版本发布于 {date}", {
+            date: new Date(info.publishedAt).toLocaleDateString(locale()),
+          })
+        : ""}{t("。下载安装后会覆盖旧版本，扫描结果和设置都会保留。")}
     </p>
     {#if phase !== "idle"}
       <div class="progress" role="status" aria-live="polite">
@@ -148,13 +153,18 @@
         </div>
         <p>
           {phase === "installing"
-            ? "下载完成，已核对无误，正在启动安装程序…"
-            : `正在下载：${formatSize(done)} / ${formatSize(total)}（${total > 0 ? Math.floor((done / total) * 100) : 0}%）`}
+            ? t("下载完成，已核对无误，正在启动安装程序…")
+            : t("正在下载：{done} / {total}（{percent}%）", {
+                done: formatSize(done),
+                total: formatSize(total),
+                percent: total > 0 ? Math.floor((done / total) * 100) : 0,
+              })}
         </p>
         {#if phase === "installing"}
           <p class="muted">
-            安装程序需要管理员权限时，Windows 会弹出确认。DiskLens
-            随后会自动关闭，安装完成后可以从安装程序里直接打开新版本。
+            {t(
+              "安装程序需要管理员权限时，Windows 会弹出确认。DiskLens 随后会自动关闭，安装完成后可以从安装程序里直接打开新版本。",
+            )}
           </p>
         {/if}
       </div>
@@ -177,32 +187,38 @@
       <p class="error">{installError}</p>
     {/if}
   {:else if info}
-    <h2 id="update-title">已经是最新版本</h2>
-    <p class="muted">你现在用的 {info.current} 就是最新发布的版本。</p>
+    <h2 id="update-title">{t("已经是最新版本")}</h2>
+    <p class="muted">
+      {t("你现在用的 {version} 就是最新发布的版本。", { version: info.current })}
+    </p>
   {/if}
 
-  <p class="privacy">只有点“检查更新”时，DiskLens 才会访问 GitHub，不会在后台自动联网或下载。</p>
+  <p class="privacy">
+    {t("只有点“检查更新”时，DiskLens 才会访问 GitHub，不会在后台自动联网或下载。")}
+  </p>
 
   <div class="actions">
     {#if info?.newer && phase === "downloading"}
-      <button type="button" class="secondary" onclick={() => cancelDownload()}>取消下载</button>
+      <button type="button" class="secondary" onclick={() => cancelDownload()}
+        >{t("取消下载")}</button
+      >
     {:else if info?.newer && phase === "installing"}
-      <button type="button" class="primary" disabled>正在启动安装程序…</button>
+      <button type="button" class="primary" disabled>{t("正在启动安装程序…")}</button>
     {:else if info?.newer && info.installer && !installError}
-      <button type="button" class="secondary" onclick={onclose}>以后再说</button>
+      <button type="button" class="secondary" onclick={onclose}>{t("以后再说")}</button>
       <button type="button" class="primary" onclick={downloadAndInstall}
-        >下载并安装（{formatSize(info.installer.size)}）</button
+        >{t("下载并安装（{size}）", { size: formatSize(info.installer.size) })}</button
       >
     {:else if info?.newer}
-      <button type="button" class="secondary" onclick={open}>打开下载页</button>
+      <button type="button" class="secondary" onclick={open}>{t("打开下载页")}</button>
       <button type="button" class="primary" disabled={!info.installer} onclick={downloadAndInstall}
-        >{info.installer ? "重新下载" : "下载并安装"}</button
+        >{info.installer ? t("重新下载") : t("下载并安装")}</button
       >
     {:else if error}
-      <button type="button" class="secondary" onclick={onclose}>关闭</button>
-      <button type="button" class="primary" onclick={check}>重试</button>
+      <button type="button" class="secondary" onclick={onclose}>{t("关闭")}</button>
+      <button type="button" class="primary" onclick={check}>{t("重试")}</button>
     {:else}
-      <button type="button" class="primary" disabled={checking} onclick={onclose}>好</button>
+      <button type="button" class="primary" disabled={checking} onclick={onclose}>{t("好")}</button>
     {/if}
   </div>
 </div>

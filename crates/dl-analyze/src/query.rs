@@ -98,8 +98,9 @@ impl Query {
                 parse_size(rest)?
             } else if let Some(rest) = lower.strip_prefix("type:") {
                 Cond::Type(Category::from_name(rest).ok_or_else(|| {
-                    ParseError(format!(
-                        "不认识的类别：type:{rest}，例如 type:视频、type:文档"
+                    ParseError(dl_i18n::trf!(
+                        "不认识的类别：type:{rest}，例如 type:视频、type:文档",
+                        rest = rest
                     ))
                 })?)
             } else if let Some(rest) = lower.strip_prefix("dm:") {
@@ -119,7 +120,9 @@ impl Query {
                     .filter(|e| !e.is_empty())
                     .collect();
                 if exts.is_empty() {
-                    return Err(ParseError("ext: 后面需要扩展名，例如 ext:iso;zip".into()));
+                    return Err(ParseError(
+                        dl_i18n::tr("ext: 后面需要扩展名，例如 ext:iso;zip").into(),
+                    ));
                 }
                 Cond::Ext(exts)
             } else if lower == "file:" {
@@ -188,8 +191,10 @@ impl Cmp {
 /// 解析 `dm:` / `da:` 后面的部分，得到一到两个比较条件（Unix 秒）。
 fn parse_time(spec: &str, now: u64, key: &str) -> Result<Vec<(Cmp, u32)>, ParseError> {
     let bad = || {
-        ParseError(format!(
-            "无法识别的时间：{key}:{spec}，例如 {key}:>2024-01-01、{key}:2024、{key}:<1y"
+        ParseError(dl_i18n::trf!(
+            "无法识别的时间：{key}:{spec}，例如 {key}:>2024-01-01、{key}:2024、{key}:<1y",
+            key = key,
+            spec = spec
         ))
     };
     let (cmp, rest) = if let Some(r) = spec.strip_prefix(">=") {
@@ -295,7 +300,12 @@ fn parse_size(spec: &str) -> Result<Cond, ParseError> {
     } else {
         (Cmp::Eq, spec)
     };
-    let bad = || ParseError(format!("无法识别的大小：size:{spec}，例如 size:>1gb"));
+    let bad = || {
+        ParseError(dl_i18n::trf!(
+            "无法识别的大小：size:{spec}，例如 size:>1gb",
+            spec = spec
+        ))
+    };
     let digits_end = rest
         .find(|c: char| !(c.is_ascii_digit() || c == '.'))
         .unwrap_or(rest.len());

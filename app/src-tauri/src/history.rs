@@ -118,7 +118,8 @@ pub async fn restore_items(items: Vec<RestoreKey>) -> Result<RestoreResult, Stri
                 None => (
                     0,
                     Outcome::Failed(
-                        "回收站里已经找不到它，可能回收站已被清空，或者已经放回".into(),
+                        dl_i18n::tr("回收站里已经找不到它，可能回收站已被清空，或者已经放回")
+                            .into(),
                     ),
                 ),
                 Some(item) => match recycle::restore(&item) {
@@ -127,7 +128,7 @@ pub async fn restore_items(items: Vec<RestoreKey>) -> Result<RestoreResult, Stri
                 },
             };
             if let Err(e) = log.append(&LogEntry::restored(Path::new(&key.path), size, &outcome)) {
-                result.log_error = Some(format!("写入操作日志失败：{e}"));
+                result.log_error = Some(dl_i18n::trf!("写入操作日志失败：{e}", e = e));
             }
             match outcome {
                 Outcome::Restored => result.restored.push(key.path),

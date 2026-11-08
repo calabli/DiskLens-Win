@@ -1,4 +1,5 @@
 import type { TreemapRect } from "$lib/api";
+import { t, tk } from "./i18n.svelte";
 
 /** 与 Rust 侧 `dl_analyze::Category::ALL` 的顺序一致，树图二进制数据里存的是这里的下标。 */
 export const CATEGORY_KEYS = [
@@ -20,17 +21,26 @@ interface CategoryStyle {
 }
 
 const LABELS: Record<CategoryKey, string> = {
-  system: "系统文件",
-  app: "应用程序",
-  dev: "开发缓存",
-  media: "音视频",
-  package: "安装包与镜像",
-  document: "文档与图片",
-  other: "其他",
+  system: tk("系统文件"),
+  app: tk("应用程序"),
+  dev: tk("开发缓存"),
+  media: tk("音视频"),
+  package: tk("安装包与镜像"),
+  document: tk("文档与图片"),
+  other: tk("其他"),
 };
 
+/** 类别的名称（按当前语言）和颜色。 */
 export const CATEGORIES = Object.fromEntries(
-  CATEGORY_KEYS.map((k) => [k, { label: LABELS[k], color: `var(--cat-${k})` }]),
+  CATEGORY_KEYS.map((k) => [
+    k,
+    {
+      get label() {
+        return t(LABELS[k]);
+      },
+      color: `var(--cat-${k})`,
+    },
+  ]),
 ) as Record<CategoryKey, CategoryStyle>;
 
 /**

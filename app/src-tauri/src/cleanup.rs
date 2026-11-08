@@ -211,7 +211,7 @@ pub(crate) async fn execute(
         deleted: Vec::new(),
         failed: Vec::new(),
         freed: 0,
-        log_error: log_error.map(|e| format!("操作日志写入失败：{e}")),
+        log_error: log_error.map(|e| dl_i18n::trf!("操作日志写入失败：{e}", e = e)),
     };
     {
         let mut t = scan.tree.write().expect("tree poisoned");
@@ -278,7 +278,7 @@ pub async fn link_items(
             for id in dedup(g.replace).into_iter().filter(|&id| id != g.keep) {
                 check(&t, id)?;
                 if t.kind(id) != NodeKind::File {
-                    return Err(format!("{} 不是文件", t.path(id)));
+                    return Err(dl_i18n::trf!("{t} 不是文件", t = t.path(id)));
                 }
                 ids.push(id);
                 pairs.push((
@@ -304,7 +304,7 @@ pub async fn link_items(
         linked: Vec::new(),
         failed: Vec::new(),
         freed: 0,
-        log_error: log_error.map(|e| format!("操作日志写入失败：{e}")),
+        log_error: log_error.map(|e| dl_i18n::trf!("操作日志写入失败：{e}", e = e)),
     };
     {
         let mut t = scan.tree.write().expect("tree poisoned");

@@ -9,6 +9,7 @@
     type SimilarResult,
   } from "$lib/api";
   import { formatSize } from "$lib/format";
+  import { locale, t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     rootId: number;
@@ -28,15 +29,15 @@
     $props();
 
   const LEVELS = [
-    { label: "几乎一样", value: 4 },
-    { label: "相似", value: 8 },
-    { label: "有点像", value: 12 },
+    { label: tk("几乎一样"), value: 4 },
+    { label: tk("相似"), value: 8 },
+    { label: tk("有点像"), value: 12 },
   ];
   const SIZES = [
     { label: "≥ 20 KB", value: 20 << 10 },
     { label: "≥ 100 KB", value: 100 << 10 },
     { label: "≥ 1 MB", value: 1 << 20 },
-    { label: "全部", value: 1 },
+    { label: tk("全部"), value: 1 },
   ];
   /** 一次显示的组数，滚动到底再多显示。 */
   const PAGE = 40;
@@ -75,6 +76,15 @@
   const markedFiles = $derived(groups.flat().filter((f) => marked.has(f.id)));
   const markedSize = $derived(markedFiles.reduce((sum, f) => sum + f.size, 0));
 
+  /** “分析了多少张、用时多久、几张读不了”。 */
+  function analyzed(r: { images: number; elapsedMs: number; skipped: number }): string {
+    const base = t("分析了 {n} 张图片，用时 {s} 秒", {
+      n: r.images.toLocaleString(),
+      s: (r.elapsedMs / 1000).toFixed(1),
+    });
+    return r.skipped > 0 ? base + t("，{n} 张无法读取", { n: r.skipped }) : base;
+  }
+
   /** 每组保留第一张（像素最多的），其余勾选。 */
   function markAllButBest() {
     marked.clear();
@@ -96,7 +106,7 @@
       });
       markAllButBest();
     } catch (e) {
-      if (String(e) !== "已取消") error = String(e);
+      if (String(e) !== t("已取消")) error = String(e);
     } finally {
       running = false;
     }
@@ -144,7 +154,7 @@
   }
 
   function date(ms: number) {
-    return new Date(ms).toLocaleDateString("zh-CN");
+    return new Date(ms).toLocaleDateString(locale());
   }
 
   function onscroll(event: Event) {
@@ -155,36 +165,40 @@
   }
 </script>
 
-<section class="similar" aria-label="相似图片">
+<section class="similar" aria-label={t("相似图片")}>
   <header>
     <div class="title">
-      <h2>相似图片</h2>
-      <span>在 {rootName} 中查找看起来相同的图片：缩放、另存、重新压缩或调过色的都能找出</span>
+      <h2>{t("相似图片")}</h2>
+      <span
+        >{t("在 {root} 中查找看起来相同的图片：缩放、另存、重新压缩或调过色的都能找出", {
+          root: rootName,
+        })}</span
+      >
     </div>
-    <div class="levels" role="radiogroup" aria-label="相似程度">
+    <div class="levels" role="radiogroup" aria-label={t("相似程度")}>
       {#each LEVELS as l (l.value)}
         <button
           type="button"
           role="radio"
           aria-checked={maxDistance === l.value}
           disabled={running}
-          onclick={() => (maxDistance = l.value)}>{l.label}</button
+          onclick={() => (maxDistance = l.value)}>{t(l.label)}</button
         >
       {/each}
     </div>
-    <select bind:value={minSize} disabled={running} aria-label="最小文件大小">
+    <select bind:value={minSize} disabled={running} aria-label={t("最小文件大小")}>
       {#each SIZES as s (s.value)}
-        <option value={s.value}>{s.label}</option>
+        <option value={s.value}>{t(s.label)}</option>
       {/each}
     </select>
     {#if running}
-      <button type="button" class="secondary" onclick={() => cancelSimilar()}>停止</button>
+      <button type="button" class="secondary" onclick={() => cancelSimilar()}>{t("停止")}</button>
     {:else}
       <button type="button" class="primary" onclick={start}
-        >{result ? "重新查找" : "开始查找"}</button
+        >{result ? t("重新查找") : t("开始查找")}</button
       >
     {/if}
-    <button type="button" class="close" onclick={onclose} aria-label="关闭">
+    <button type="button" class="close" onclick={onclose} aria-label={t("关闭")}>
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
         ><path
           d="m4 4 8 8M12 4l-8 8"
@@ -203,36 +217,34 @@
   {#if running}
     <div class="state" aria-live="polite">
       <p>
-        正在分析图片{total > 0 ? ` · ${done.toLocaleString()} / ${total.toLocaleString()}` : "…"}
+        {t("正在分析图片")}{total > 0
+          ? ` · ${done.toLocaleString()} / ${total.toLocaleString()}`
+          : "…"}
       </p>
       <div class="progress" role="progressbar">
         <span style:width="{total > 0 ? (done / total) * 100 : 0}%"></span>
       </div>
-      <p class="muted">第一次需要逐张解码，分析过的图片下次会快很多。</p>
+      <p class="muted">{t("第一次需要逐张解码，分析过的图片下次会快很多。")}</p>
     </div>
   {:else if !result}
     <div class="state">
-      <p>支持 JPG、PNG、BMP、GIF、WebP。每组默认保留像素最多的那张。</p>
-      <p class="muted">暂不支持 HEIC（iPhone 照片格式）。</p>
+      <p>{t("支持 JPG、PNG、BMP、GIF、WebP。每组默认保留像素最多的那张。")}</p>
+      <p class="muted">{t("暂不支持 HEIC（iPhone 照片格式）。")}</p>
     </div>
   {:else if groups.length === 0}
     <div class="state">
-      <p>{result.groups.length > 0 ? "相似图片都已处理。" : "没有找到相似的图片。"}</p>
+      <p>{result.groups.length > 0 ? t("相似图片都已处理。") : t("没有找到相似的图片。")}</p>
       <p class="muted">
-        分析了 {result.images.toLocaleString()} 张图片，用时 {(result.elapsedMs / 1000).toFixed(1)} 秒{result.skipped >
-        0
-          ? `，${result.skipped} 张无法读取`
-          : ""}。
+        {analyzed(result)}{t("。")}
       </p>
     </div>
   {:else}
     <div class="summary">
-      <strong>{groups.length.toLocaleString()} 组</strong>
+      <strong>{t("{n} 组", { n: groups.length.toLocaleString() })}</strong>
       <span class="muted"
-        >分析了 {result.images.toLocaleString()} 张图片，用时 {(result.elapsedMs / 1000).toFixed(1)} 秒{result.skipped >
-        0
-          ? `，${result.skipped} 张无法读取`
-          : ""}{result.moreGroups > 0 ? `，另有 ${result.moreGroups} 组未列出` : ""}</span
+        >{analyzed(result)}{result.moreGroups > 0
+          ? t("，另有 {n} 组未列出", { n: result.moreGroups })
+          : ""}</span
       >
     </div>
     <div class="groups" {onscroll}>
@@ -246,11 +258,13 @@
                 class="pic"
                 onclick={() => toggle(files, f)}
                 aria-pressed={on}
-                aria-label="{on ? '取消勾选' : '勾选删除'} {f.path}"
+                aria-label={on
+                  ? t("取消勾选 {path}", { path: f.path })
+                  : t("勾选删除 {path}", { path: f.path })}
               >
                 <img use:thumb={f.id} alt="" />
                 <span class="check" aria-hidden="true">{on ? "✓" : ""}</span>
-                {#if !on}<span class="keep">保留</span>{/if}
+                {#if !on}<span class="keep">{t("保留")}</span>{/if}
               </button>
               <button type="button" class="name" title={f.path} onclick={() => onreveal(f.id)}
                 >{name(f.path)}</button
@@ -258,7 +272,7 @@
               <span class="meta"
                 >{f.width}×{f.height} · {formatSize(f.size)} · {date(f.modifiedMs)}</span
               >
-              {#if f.distance > 0}<span class="meta">差异 {f.distance}</span>{/if}
+              {#if f.distance > 0}<span class="meta">{t("差异 {n}", { n: f.distance })}</span>{/if}
             </div>
           {/each}
         </article>
@@ -266,26 +280,27 @@
     </div>
     <footer>
       <span
-        >已勾选 <strong>{markedFiles.length.toLocaleString()}</strong> 张，可释放
+        >{t("已勾选")} <strong>{markedFiles.length.toLocaleString()}</strong>
+        {t("张，可释放")}
         <strong>{formatSize(markedSize)}</strong></span
       >
       <button
         type="button"
         class="link"
         onclick={() => marked.clear()}
-        disabled={markedFiles.length === 0}>全部取消</button
+        disabled={markedFiles.length === 0}>{t("全部取消")}</button
       >
       <button
         type="button"
         class="secondary"
         disabled={markedFiles.length === 0}
-        onclick={() => onbasket(markedFiles.map((f) => f.id))}>加入收集篮</button
+        onclick={() => onbasket(markedFiles.map((f) => f.id))}>{t("加入收集篮")}</button
       >
       <button
         type="button"
         class="primary"
         disabled={markedFiles.length === 0}
-        onclick={() => ondelete(markedFiles.map((f) => f.id))}>删除勾选的图片…</button
+        onclick={() => ondelete(markedFiles.map((f) => f.id))}>{t("删除勾选的图片…")}</button
       >
     </footer>
   {/if}

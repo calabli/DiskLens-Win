@@ -113,9 +113,9 @@ mod sys {
         } else {
             let e = std::io::Error::last_os_error();
             Err(if e.raw_os_error() == Some(1223) {
-                "已取消".into()
+                dl_i18n::tr("已取消").into()
             } else {
-                format!("无法以管理员身份启动：{e}")
+                dl_i18n::trf!("无法以管理员身份启动：{e}", e = e)
             })
         }
     }
@@ -138,7 +138,7 @@ mod sys {
     }
 
     pub fn run_elevated(_: &std::path::Path, _: &str) -> Result<(), String> {
-        Err("只在 Windows 上支持".into())
+        Err(dl_i18n::tr("只在 Windows 上支持").into())
     }
 
     pub fn wait_for_exit(_: u32, _: u32) {}

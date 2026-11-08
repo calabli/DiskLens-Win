@@ -103,12 +103,12 @@ impl UnreadableDir {
 fn reason(kind: std::io::ErrorKind, code: Option<i32>) -> String {
     use std::io::ErrorKind;
     match (code, kind) {
-        (Some(5), _) | (None, ErrorKind::PermissionDenied) => "没有访问权限".into(),
-        (Some(32), _) => "正被其他程序占用".into(),
-        (Some(2 | 3), _) | (None, ErrorKind::NotFound) => "扫描时已经不存在".into(),
-        (Some(21), _) => "设备未就绪".into(),
-        (Some(1920), _) => "系统无法访问".into(),
-        (Some(c), _) => format!("系统错误 {c}"),
+        (Some(5), _) | (None, ErrorKind::PermissionDenied) => "没有访问权限".into(), // i18n-ignore
+        (Some(32), _) => "正被其他程序占用".into(),                                  // i18n-ignore
+        (Some(2 | 3), _) | (None, ErrorKind::NotFound) => "扫描时已经不存在".into(), // i18n-ignore
+        (Some(21), _) => "设备未就绪".into(),                                        // i18n-ignore
+        (Some(1920), _) => "系统无法访问".into(),                                    // i18n-ignore
+        (Some(c), _) => format!("系统错误 {c}"),                                     // i18n-ignore
         (None, k) => k.to_string(),
     }
 }
@@ -206,7 +206,7 @@ impl AppState {
             .lock()
             .expect("state poisoned")
             .clone()
-            .ok_or_else(|| "还没有扫描结果".to_string())
+            .ok_or_else(|| dl_i18n::tr("还没有扫描结果").to_string())
     }
 }
 
@@ -243,7 +243,7 @@ pub async fn start_scan(
         .map_err(|e| e.to_string())??;
 
     if cancel.load(Ordering::Relaxed) {
-        return Err("已取消".into());
+        return Err(dl_i18n::tr("已取消").into());
     }
     let summary = scanned.summary.clone();
     let scanned = Arc::new(scanned);
@@ -313,7 +313,7 @@ fn run_scan(
                 *scanned.journal.lock().expect("journal poisoned") = journal;
                 return Ok(scanned);
             }
-            Err(dl_ntfs::Error::Cancelled) => return Err("已取消".into()),
+            Err(dl_ntfs::Error::Cancelled) => return Err(dl_i18n::tr("已取消").into()),
             Err(e) => fallback_reason = Some(e.to_string()),
         }
     }
@@ -324,9 +324,9 @@ fn run_scan(
     });
     let result = dl_walk::walk_live(&PathBuf::from(&path), &report, &live).map_err(|e| {
         if e.kind() == std::io::ErrorKind::Interrupted {
-            "已取消".to_string()
+            dl_i18n::tr("已取消").to_string()
         } else {
-            format!("无法扫描 {path}：{e}")
+            dl_i18n::trf!("无法扫描 {path}：{e}", path = path, e = e)
         }
     })?;
     Ok(finish(

@@ -11,6 +11,7 @@ license = "MIT"
 [workspace.dependencies]
 dl-analyze = { path = "crates/dl-analyze" }
 dl-clean = { path = "crates/dl-clean" }
+dl-i18n = { path = "crates/dl-i18n" }
 dl-ntfs = { path = "crates/dl-ntfs" }
 dl-snapshot = { path = "crates/dl-snapshot" }
 dl-tree = { path = "crates/dl-tree" }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { compareScan, setBaseline, type ChangeItem, type Comparison } from "$lib/api";
   import { formatAgo, formatSize } from "$lib/format";
+  import { locale, t, tk } from "$lib/i18n.svelte";
 
   interface Props {
     /** 数据版本；删除或刷新后递增，重新对比。 */
@@ -59,8 +60,8 @@
   }
 
   const STATUS: Record<ChangeItem["status"], string> = {
-    new: "新增",
-    removed: "已不在",
+    new: tk("新增"),
+    removed: tk("已不在"),
     changed: "",
   };
 </script>
@@ -75,7 +76,8 @@
         <li>
           <div class="text">
             <span class="name" title={c.path}
-              >{name(c.path)}{#if STATUS[c.status]}<em class="tag {c.status}">{STATUS[c.status]}</em
+              >{name(c.path)}{#if STATUS[c.status]}<em class="tag {c.status}"
+                  >{t(STATUS[c.status])}</em
                 >{/if}</span
             >
             <span class="path" title={c.path}>{folder(c.path)}</span>
@@ -83,7 +85,7 @@
           <span class="was">{formatSize(c.before)} → {formatSize(c.after)}</span>
           <span class="delta" class:up={delta > 0} class:down={delta < 0}>{signed(delta)}</span>
           {#if c.id != null}
-            <button type="button" class="link" onclick={() => onreveal(c.id!)}>定位</button>
+            <button type="button" class="link" onclick={() => onreveal(c.id!)}>{t("定位")}</button>
           {:else}
             <span></span>
           {/if}
@@ -93,16 +95,16 @@
   {/if}
 {/snippet}
 
-<section class="changes" aria-label="变化对比">
+<section class="changes" aria-label={t("变化对比")}>
   <header>
     <div class="title">
-      <h2>变化对比</h2>
-      <span>和对比基准（上一次完整扫描）相比，哪些文件夹和文件变大了、变小了。</span>
+      <h2>{t("变化对比")}</h2>
+      <span>{t("和对比基准（上一次完整扫描）相比，哪些文件夹和文件变大了、变小了。")}</span>
     </div>
     <button type="button" class="secondary" disabled={saving || loading} onclick={rebase}
-      >{saving ? "正在保存…" : "把现在设为对比基准"}</button
+      >{saving ? t("正在保存…") : t("把现在设为对比基准")}</button
     >
-    <button type="button" class="close" onclick={onclose} aria-label="关闭">
+    <button type="button" class="close" onclick={onclose} aria-label={t("关闭")}>
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
         ><path
           d="m4 4 8 8M12 4l-8 8"
@@ -120,13 +122,14 @@
 
   <div class="scroll">
     {#if loading && !result}
-      <p class="muted">正在对比…</p>
+      <p class="muted">{t("正在对比…")}</p>
     {:else if result && result.baseScannedAt == null}
       <div class="empty">
-        <p>还没有可以对比的上一次扫描。</p>
+        <p>{t("还没有可以对比的上一次扫描。")}</p>
         <p class="muted">
-          下次完整扫描（换一个位置扫描，或按住 Shift
-          点刷新）后，就能和这次的结果对比；也可以现在点“把现在设为对比基准”，过一段时间再回来看变化。
+          {t(
+            "下次完整扫描（换一个位置扫描，或按住 Shift 点刷新）后，就能和这次的结果对比；也可以现在点“把现在设为对比基准”，过一段时间再回来看变化。",
+          )}
         </p>
       </div>
     {:else if result}
@@ -135,25 +138,39 @@
         <div class="big">
           <span class="delta" class:up={delta > 0} class:down={delta < 0}>{signed(delta)}</span>
           <span class="muted"
-            >{formatSize(result.beforeSize)} → {formatSize(result.afterSize)}，文件数 {result.beforeFiles.toLocaleString()}
-            → {result.afterFiles.toLocaleString()}</span
+            >{formatSize(result.beforeSize)} → {formatSize(result.afterSize)}{t(
+              "，文件数 {before} → {after}",
+              {
+                before: result.beforeFiles.toLocaleString(),
+                after: result.afterFiles.toLocaleString(),
+              },
+            )}</span
           >
         </div>
         <p class="muted">
-          对比基准：{formatAgo(result.baseScannedAt!)}的扫描结果（{new Date(
-            result.baseScannedAt!,
-          ).toLocaleString("zh-CN")}）
+          {t("对比基准：{ago}的扫描结果（{time}）", {
+            ago: formatAgo(result.baseScannedAt!),
+            time: new Date(result.baseScannedAt!).toLocaleString(locale()),
+          })}
         </p>
       </div>
 
-      <h3>变大的 <span>{result.grown.length > 0 ? `${result.grown.length} 处` : ""}</span></h3>
-      {@render list(result.grown, "没有明显变大的地方。")}
+      <h3>
+        {t("变大的")}
+        <span>{result.grown.length > 0 ? t("{n} 处", { n: result.grown.length }) : ""}</span>
+      </h3>
+      {@render list(result.grown, t("没有明显变大的地方。"))}
 
-      <h3>变小的 <span>{result.shrunk.length > 0 ? `${result.shrunk.length} 处` : ""}</span></h3>
-      {@render list(result.shrunk, "没有明显变小的地方。")}
+      <h3>
+        {t("变小的")}
+        <span>{result.shrunk.length > 0 ? t("{n} 处", { n: result.shrunk.length }) : ""}</span>
+      </h3>
+      {@render list(result.shrunk, t("没有明显变小的地方。"))}
 
       <p class="note muted">
-        只列出变化较大的位置。一处变化如果主要发生在某个子文件夹里，就只列那个子文件夹，不再重复列它的上级。
+        {t(
+          "只列出变化较大的位置。一处变化如果主要发生在某个子文件夹里，就只列那个子文件夹，不再重复列它的上级。",
+        )}
       </p>
     {/if}
   </div>
